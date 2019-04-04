@@ -10,7 +10,7 @@ const DELETE_FILE_INTERVAL: usize = 3;
 pub enum LogType {
     Skip = !0,
     Propose = 1,
-    Vote = 2,
+    SignedVote = 2,
     State = 3,
     PrevHash = 4,
     Commits = 5,
@@ -23,7 +23,7 @@ impl From<u8> for LogType {
     fn from(s: u8) -> LogType {
         match s {
             1 => LogType::Propose,
-            2 => LogType::Vote,
+            2 => LogType::SignedVote,
             3 => LogType::State,
             4 => LogType::PrevHash,
             5 => LogType::Commits,

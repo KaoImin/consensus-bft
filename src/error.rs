@@ -1,1 +1,7 @@
-pub enum ConsensusError {}
+///
+pub enum ConsensusError {
+    ///
+    BlockVerifyDiff,
+    ///
+    SendMsgErr,
+}
