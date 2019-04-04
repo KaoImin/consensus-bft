@@ -1,0 +1,11 @@
+[package]
+name = "consensus-bft"
+version = "0.0.1"
+authors = ["Eason Gao <kaoimin@qq.com>", "Cryptape Technologies <contact@cryptape.com>"]
+edition = "2018"
+license = "MIT"
+
+[dependencies]
+bft-rs = { git = "https://github.com/KaoImin/bft-rs.git", branch = "develop"}
+cita-crypto = { git = "https://github.com/cryptape/cita-common.git", branch = "develop" }
+rlp = "0.3.0"
