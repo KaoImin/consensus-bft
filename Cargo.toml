@@ -6,7 +6,20 @@ edition = "2018"
 license = "MIT"
 
 [dependencies]
-bft-rs = { git = "https://github.com/KaoImin/bft-rs.git", branch = "develop"}
+arraymap = "0.1.1"
+bft-rs = { git = "https://github.com/KaoImin/bft-rs.git", rev = "1770a5d0b8e2c34fed1cb39cf829100ff7976169" }
+bincode = "1.1.2"
+blake2b_simd = "0.4.1"
 cita-crypto = { git = "https://github.com/cryptape/cita-common.git", branch = "develop" }
+crossbeam = "0.7"
+ethereum-types = "0.3.2"
 log = "0.4.3"
+lru-cache = "0.1"
 rlp = "0.3.0"
+serde = "1.0"
+serde_derive = "1.0"
+
+[features]
+default = ["verify_req", "ed25519"]
+verify_req = ["bft-rs/verify_req"]
+ed25519 = ["cita-crypto/ed25519"]
