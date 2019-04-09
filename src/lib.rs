@@ -2,19 +2,37 @@
 //!
 
 #![deny(missing_docs)]
-
-extern crate bft_rs;
-extern crate cita_crypto;
+#[warn(unused_imports)]
+extern crate bft_rs as bft;
+extern crate bincode;
+extern crate blake2b_simd as blake2b;
+extern crate cita_crypto as crypto;
+#[macro_use]
+extern crate crossbeam;
+extern crate ethereum_types;
 #[macro_use]
 extern crate log;
+extern crate lru_cache;
 extern crate rlp;
+#[macro_use]
+extern crate serde_derive;
 
+///
+pub mod collection;
+///
 pub mod consensus;
+///
 pub mod error;
+///
 pub mod wal;
 
-use crate::{consensus::INIT_HEIGHT, error::ConsensusError};
-use bft_rs as bft;
+use crate::{
+    consensus::{INIT_HEIGHT, PLACEHOLDER},
+    error::ConsensusError,
+};
+use bincode::serialize;
+use crypto::Signature;
+use rlp::{Encodable, RlpStream};
 use std::collections::HashMap;
 
 ///
@@ -24,31 +42,77 @@ pub type Hash = Vec<u8>;
 
 ///
 pub enum ConsensusInput {
+    ///
     SignedProposal(SignedProposal),
+    ///
     SignedVote(SignedVote),
+    ///
     Status(Status),
+    ///
     VerifyResp(VerifyResp),
+    ///
     Feed(Feed),
+    ///
     Pause,
+    ///
     Start,
 }
 
 ///
 pub enum ConsensusOutput {
+    ///
     SignedProposal(SignedProposal),
+    ///
     SignedVote(SignedVote),
 }
 
 ///
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum VoteType {
+    ///
     Prevote,
+    ///
     Precommit,
 }
 
+impl Into<u8> for VoteType {
+    fn into(self) -> u8 {
+        match self {
+            VoteType::Prevote => 0,
+            VoteType::Prevote => 1,
+            _ => panic!("Invalid type"),
+        }
+    }
+}
+
 ///
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, Eq, PartialEq, Hash)]
+pub struct Message {
+    mtype: String,
+    msg: Vec<u8>,
+}
+
+impl Message {
+    pub(crate) fn from_proposal(signed_proposal: SignedProposal) -> Message {
+        Message {
+            mtype: "SignedProposal".to_string(),
+            msg: serialize(&signed_proposal).expect("Serialize SignedProposal Fail!"),
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+///
 pub struct SignedProposal {
+    ///
+    pub proposal: Proposal,
+    ///
+    pub signature: Vec<u8>,
+}
+
+///
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct Proposal {
     ///
     pub height: u64,
     ///
@@ -63,36 +127,61 @@ pub struct SignedProposal {
     pub lock_votes: Vec<SignedVote>,
     ///
     pub proposer: Address,
-    ///
-    pub signature: Vec<u8>,
 }
 
-impl SignedProposal {
+impl Encodable for Proposal {
+    fn rlp_append(&self, s: &mut RlpStream) {
+        s.append(&self.height)
+            .append(&self.round)
+            .append(&self.block);
+        if let Some(lock_round) = self.lock_round {
+            s.append(&lock_round).append_list(&self.lock_votes);
+        }
+        s.append(&self.proposer);
+    }
+}
+
+impl Proposal {
     pub(crate) fn to_bft_proposal(&self) -> bft::Proposal {
         let lock_votes = if self.lock_round.is_some() {
             let mut res = Vec::new();
             for vote in self.lock_votes.iter() {
-                res.push(vote.to_bft_vote());
+                res.push(vote.vote.to_bft_vote());
             }
-            res
+            Some(res)
         } else {
-            Vec::new()
+            None
         };
 
         bft::Proposal {
             height: self.height,
             round: self.round,
-            content: self.block,
+            content: self.block.clone(),
             lock_round: self.lock_round,
             lock_votes,
-            proposer: self.proposer,
+            proposer: self.proposer.clone(),
         }
     }
 }
 
 ///
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct SignedVote {
+    ///
+    pub vote: Vote,
+    ///
+    pub signature: Vec<u8>,
+}
+
+impl Encodable for SignedVote {
+    fn rlp_append(&self, s: &mut RlpStream) {
+        s.append(&self.vote).append_list(&self.signature);
+    }
+}
+
+///
+#[derive(Serialize, Deserialize, Clone, Debug, Eq, PartialEq)]
+pub struct Vote {
     ///
     pub vote_type: VoteType,
     ///
@@ -103,11 +192,23 @@ pub struct SignedVote {
     pub block_hash: Hash,
     ///
     pub voter: Address,
-    ///
-    pub signature: Vec<u8>,
 }
 
-impl SignedVote {
+impl Encodable for Vote {
+    fn rlp_append(&self, s: &mut RlpStream) {
+        match self.vote_type {
+            VoteType::Prevote => s.append(&(0 as u8)),
+            VoteType::Precommit => s.append(&(1 as u8)),
+            _ => panic!(""),
+        };
+        s.append(&self.height)
+            .append(&self.round)
+            .append(&self.block_hash)
+            .append(&self.voter);
+    }
+}
+
+impl Vote {
     pub(crate) fn to_bft_vote(&self) -> bft::Vote {
         let vote_type = if self.vote_type == VoteType::Prevote {
             bft::VoteType::Prevote
@@ -119,14 +220,24 @@ impl SignedVote {
             vote_type,
             height: self.height,
             round: self.round,
-            proposal: self.block_hash,
-            voter: self.voter,
+            proposal: self.block_hash.clone(),
+            voter: self.voter.clone(),
+        }
+    }
+
+    pub(crate) fn from_bft_vote(vote: bft::Vote, vtype: VoteType) -> Vote {
+        Vote {
+            vote_type: vtype,
+            height: vote.height,
+            round: vote.round,
+            block_hash: vote.proposal,
+            voter: vote.voter,
         }
     }
 }
 
 ///
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct Commit {
     ///
     pub height: u64,
@@ -135,13 +246,13 @@ pub struct Commit {
     ///
     pub pre_hash: Hash,
     ///
-    pub proof: Proof ,
+    pub proof: Proof,
     ///
     pub address: Address,
 }
 
 ///
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct Status {
     ///
     pub height: u64,
@@ -157,7 +268,7 @@ impl Status {
     pub(crate) fn to_bft_status(&self) -> bft::Status {
         let mut res = Vec::new();
         for node in self.authority_list.iter() {
-            res.push(node.to_bft_node());
+            res.push(node.address.to_owned());
         }
         bft::Status {
             height: self.height,
@@ -176,6 +287,15 @@ pub struct Feed {
     pub block: Vec<u8>,
 }
 
+impl Feed {
+    pub(crate) fn to_bft_feed(&self, proposal: Vec<u8>) -> bft::Feed {
+        bft::Feed {
+            height: self.height,
+            proposal,
+        }
+    }
+}
+
 ///
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct VerifyResp {
@@ -185,6 +305,16 @@ pub struct VerifyResp {
     pub block_hash: Hash,
 }
 
+impl VerifyResp {
+    fn to_BftResp(&self) -> bft::VerifyResp {
+        bft::VerifyResp {
+            is_pass: self.is_pass,
+            proposal: self.block_hash.clone(),
+        }
+    }
+}
+
+///
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct AuthorityManage {
     ///
@@ -205,7 +335,17 @@ impl Default for AuthorityManage {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+impl AuthorityManage {
+    pub(crate) fn update_authority(&mut self, h: u64, auth_list: Vec<Node>) {
+        let tmp = self.authorities.clone();
+        self.authorities = auth_list;
+        self.authorities_old = tmp;
+        self.authority_h_old = h;
+    }
+}
+
+///
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct Node {
     ///
     pub address: Address,
@@ -215,17 +355,18 @@ pub struct Node {
     pub vote_weight: u32,
 }
 
-impl Node {
-    pub(crate) fn to_bft_node(&self) -> bft::Node {
-        bft::Node {
-            address: self.address,
-            propose_weight: self.proposal_weight,
-            vote_weight: self.vote_weight,
-        }
-    }
-}
+// impl Node {
+//     pub(crate) fn to_bft_node(&self) -> bft::Node {
+//         bft::Node {
+//             address: self.address,
+//             propose_weight: self.proposal_weight,
+//             vote_weight: self.vote_weight,
+//         }
+//     }
+// }
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+///
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct Proof {
     ///
     pub block_hash: Hash,
@@ -234,9 +375,22 @@ pub struct Proof {
     ///
     pub round: u64,
     ///
-    pub precommit_votes: HashMap<Address, Vec<u8>>,
+    pub precommit_votes: HashMap<Address, Signature>,
 }
 
+impl Encodable for Proof {
+    fn rlp_append(&self, s: &mut RlpStream) {
+        let tmp = self.precommit_votes.clone();
+        s.append_list(&self.block_hash)
+            .append(&self.height)
+            .append(&self.round);
+        for (k, v) in tmp.iter() {
+            s.append_list(&k).append_list(&v.0.to_vec());
+        }
+    }
+}
+
+///
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct LockStatus {
     ///
@@ -250,11 +404,17 @@ pub struct LockStatus {
 ///
 pub trait ConsensusSupport {
     ///
-    fn transmit(&self, msg: ConsensusOutput) -> Result<(), ConsensusError>;
+    fn transmit(&self, msg: ConsensusOutput) -> Result<bool, ConsensusError>;
     ///
-    fn check_block(&self, block: &[u8]) -> Result<(), ConsensusError>;
+    fn check_block(&self, block: &[u8]) -> Result<bool, ConsensusError>;
     ///
     fn commit(&self, commit: Commit) -> Result<(), ConsensusError>;
+    ///
+    fn signature(&self, hash: &[u8]) -> Option<Vec<u8>>;
+    ///
+    fn check_signature(&self, signature: &[u8], hash: &[u8]) -> Option<Address>;
+    ///
+    fn crypt_hash(&self, msg: &[u8]) -> Vec<u8>; 
 }
 
 // ///
