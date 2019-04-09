@@ -4,68 +4,44 @@ use std::io::{self, Read, Seek, Write};
 use std::mem::transmute;
 use std::str;
 
-const DELETE_FILE_INTERVAL: usize = 3;
+const DELETE_FILE_INTERVAL: u64 = 3;
 
-#[derive(Debug, Clone, Copy)]
-pub enum LogType {
-    Skip = !0,
-    Propose = 1,
-    SignedVote = 2,
-    State = 3,
-    PrevHash = 4,
-    Commits = 5,
-    VerifiedPropose = 6,
-    VerifiedBlock = 8,
-    AuthTxs = 9,
-}
-
-impl From<u8> for LogType {
-    fn from(s: u8) -> LogType {
-        match s {
-            1 => LogType::Propose,
-            2 => LogType::SignedVote,
-            3 => LogType::State,
-            4 => LogType::PrevHash,
-            5 => LogType::Commits,
-            6 => LogType::VerifiedPropose,
-            8 => LogType::VerifiedBlock,
-            9 => LogType::AuthTxs,
-            _ => LogType::Skip,
-        }
-    }
-}
-
-pub struct Wal {
-    height_fs: BTreeMap<usize, File>,
+pub(crate) struct Wal {
+    height_fs: BTreeMap<u64, File>,
     dir: String,
-    current_height: usize,
-    ifile: File,
+    current_height: u64,
+    ifile: File, // store off-line height
 }
 
 impl Wal {
-    pub fn create(dir: &str) -> Result<Wal, io::Error> {
+    pub(crate) fn new(dir: &str) -> Result<Wal, io::Error> {
         let fss = read_dir(&dir);
         if fss.is_err() {
-            DirBuilder::new().recursive(true).create(dir).unwrap();
+            DirBuilder::new()
+                .recursive(true)
+                .create(dir)
+                .expect("Create wal directory failed!");
         }
 
         let file_path = dir.to_string() + "/" + "index";
+        let expect_str = format!("Seek wal file {:?} failed!", &file_path);
         let mut ifs = OpenOptions::new()
             .read(true)
             .create(true)
             .write(true)
             .open(file_path)?;
-        ifs.seek(io::SeekFrom::Start(0)).unwrap();
+
+        ifs.seek(io::SeekFrom::Start(0)).expect(&expect_str);
 
         let mut string_buf: String = String::new();
         let res_fsize = ifs.read_to_string(&mut string_buf)?;
-        let cur_height: usize;
+        let cur_height: u64;
         let last_file_path: String;
         if res_fsize == 0 {
-            last_file_path = dir.to_string() + "/1.log";
-            cur_height = 1;
+            last_file_path = dir.to_string() + "/0.log";
+            cur_height = 0;
         } else {
-            let hi_res = string_buf.parse::<usize>();
+            let hi_res = string_buf.parse::<u64>();
             if let Ok(hi) = hi_res {
                 cur_height = hi;
                 last_file_path = dir.to_string() + "/" + cur_height.to_string().as_str() + ".log"
@@ -94,14 +70,14 @@ impl Wal {
         })
     }
 
-    fn get_file_path(dir: &str, height: usize) -> String {
+    fn get_file_path(dir: &str, height: u64) -> String {
         let mut name = height.to_string();
         name += ".log";
         let pathname = dir.to_string() + "/";
         pathname.clone() + &*name
     }
 
-    pub fn set_height(&mut self, height: usize) -> Result<(), io::Error> {
+    pub fn set_height(&mut self, height: u64) -> Result<(), io::Error> {
         self.current_height = height;
         self.ifile.seek(io::SeekFrom::Start(0))?;
         let hstr = height.to_string();
@@ -119,17 +95,22 @@ impl Wal {
         self.height_fs.insert(height, fs);
 
         if height > DELETE_FILE_INTERVAL {
-            self.height_fs.remove(&(height - DELETE_FILE_INTERVAL));
-            let delfilename = Wal::get_file_path(&self.dir, height - DELETE_FILE_INTERVAL);
-            let _ = ::std::fs::remove_file(delfilename);
+            let saved_height_fs = self.height_fs.split_off(&(height - DELETE_FILE_INTERVAL));
+            {
+                for (height, _) in self.height_fs.iter() {
+                    let delfilename = Wal::get_file_path(&self.dir, *height);
+                    let _ = ::std::fs::remove_file(delfilename);
+                }
+            }
+            self.height_fs = saved_height_fs;
         }
         Ok(())
     }
 
-    pub fn save(&mut self, height: usize, log_type: LogType, msg: &[u8]) -> io::Result<usize> {
-        let mtype = log_type as u8;
+    pub fn save(&mut self, height: u64, mtype: u8, msg: &[u8]) -> io::Result<u64> {
+        trace!("Wal save mtype: {}, height: {}", mtype, height);
         if !self.height_fs.contains_key(&height) {
-            // 2 more higher then current height, not process it
+            // 2 more higher than current height, do not process it
             if height > self.current_height + 1 {
                 return Ok(0);
             } else if height == self.current_height + 1 {
@@ -157,9 +138,9 @@ impl Wal {
             hlen = fs.write(msg)?;
             fs.flush()?;
         } else {
-            warn!("cita-bft wal save error height {} ", height);
+            warn!("Can't find wal log in height {} ", height);
         }
-        Ok(hlen)
+        Ok(hlen as u64)
     }
 
     pub fn load(&mut self) -> Vec<(u8, Vec<u8>)> {
@@ -174,12 +155,17 @@ impl Wal {
             if *height < self.current_height {
                 continue;
             }
-            fs.seek(io::SeekFrom::Start(0)).unwrap();
+            let expect_str = format!("Seek wal file {:?} of height {} failed!", fs, *height);
+            fs.seek(io::SeekFrom::Start(0)).expect(&expect_str);
             let res_fsize = fs.read_to_end(&mut vec_buf);
             if res_fsize.is_err() {
                 return vec_out;
             }
-            let fsize = res_fsize.unwrap();
+            let expect_str = format!(
+                "Get size of buf of wal file {:?} of height {} failed!",
+                fs, *height
+            );
+            let fsize = res_fsize.expect(&expect_str);
             if fsize <= 5 {
                 return vec_out;
             }

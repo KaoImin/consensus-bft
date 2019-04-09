@@ -2,7 +2,7 @@
 //!
 
 #![deny(missing_docs)]
-#[warn(unused_imports)]
+#![warn(unused_imports)]
 extern crate bft_rs as bft;
 extern crate bincode;
 extern crate blake2b_simd as blake2b;
@@ -74,7 +74,6 @@ impl Into<u8> for VoteType {
         match self {
             VoteType::Prevote => 0,
             VoteType::Precommit => 1,
-            _ => panic!("Invalid type"),
         }
     }
 }
@@ -297,7 +296,7 @@ pub struct VerifyResp {
 }
 
 impl VerifyResp {
-    fn to_BftResp(&self) -> bft::VerifyResp {
+    fn to_bft_resp(&self) -> bft::VerifyResp {
         bft::VerifyResp {
             is_pass: self.is_pass,
             proposal: self.block_hash.clone(),
