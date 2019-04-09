@@ -14,7 +14,7 @@
 
 // You should have received a copy of the GNU General Public License
 // along with this program.  If not, see <http://www.gnu.org/licenses/>.
-use crate::{Hash, Signature, SignedProposal, SignedVote, VoteType};
+use crate::{SignedProposal, SignedVote, VoteType};
 use bft::Vote as BftVote;
 
 use lru_cache::LruCache;
@@ -163,7 +163,7 @@ impl VoteSet {
 #[derive(Clone, Debug)]
 pub(crate) struct SigVote {
     proposal: Option<Vec<u8>>,
-    pub(crate) signature: Signature,
+    pub(crate) signature: Vec<u8>,
 }
 
 #[derive(Clone, Debug)]

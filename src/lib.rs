@@ -6,8 +6,6 @@
 extern crate bft_rs as bft;
 extern crate bincode;
 extern crate blake2b_simd as blake2b;
-extern crate cita_crypto as crypto;
-#[macro_use]
 extern crate crossbeam;
 extern crate ethereum_types;
 #[macro_use]
@@ -26,12 +24,8 @@ pub mod error;
 ///
 pub mod wal;
 
-use crate::{
-    consensus::{INIT_HEIGHT, PLACEHOLDER},
-    error::ConsensusError,
-};
+use crate::{consensus::INIT_HEIGHT, error::ConsensusError};
 use bincode::serialize;
-use crypto::Signature;
 use rlp::{Encodable, RlpStream};
 use std::collections::HashMap;
 
@@ -79,7 +73,7 @@ impl Into<u8> for VoteType {
     fn into(self) -> u8 {
         match self {
             VoteType::Prevote => 0,
-            VoteType::Prevote => 1,
+            VoteType::Precommit => 1,
             _ => panic!("Invalid type"),
         }
     }
@@ -196,12 +190,9 @@ pub struct Vote {
 
 impl Encodable for Vote {
     fn rlp_append(&self, s: &mut RlpStream) {
-        match self.vote_type {
-            VoteType::Prevote => s.append(&(0 as u8)),
-            VoteType::Precommit => s.append(&(1 as u8)),
-            _ => panic!(""),
-        };
-        s.append(&self.height)
+        let res: u8 = self.vote_type.clone().into();
+        s.append(&res)
+            .append(&self.height)
             .append(&self.round)
             .append(&self.block_hash)
             .append(&self.voter);
@@ -355,15 +346,16 @@ pub struct Node {
     pub vote_weight: u32,
 }
 
-// impl Node {
-//     pub(crate) fn to_bft_node(&self) -> bft::Node {
-//         bft::Node {
-//             address: self.address,
-//             propose_weight: self.proposal_weight,
-//             vote_weight: self.vote_weight,
-//         }
-//     }
-// }
+impl Node {
+    ///
+    pub fn new(address: Address) -> Self {
+        Node {
+            address,
+            proposal_weight: 1,
+            vote_weight: 1,
+        }
+    }
+}
 
 ///
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
@@ -375,7 +367,7 @@ pub struct Proof {
     ///
     pub round: u64,
     ///
-    pub precommit_votes: HashMap<Address, Signature>,
+    pub precommit_votes: HashMap<Address, Vec<u8>>,
 }
 
 impl Encodable for Proof {
@@ -385,7 +377,7 @@ impl Encodable for Proof {
             .append(&self.height)
             .append(&self.round);
         for (k, v) in tmp.iter() {
-            s.append_list(&k).append_list(&v.0.to_vec());
+            s.append_list(&k).append_list(&v);
         }
     }
 }
@@ -414,25 +406,5 @@ pub trait ConsensusSupport {
     ///
     fn check_signature(&self, signature: &[u8], hash: &[u8]) -> Option<Address>;
     ///
-    fn crypt_hash(&self, msg: &[u8]) -> Vec<u8>; 
+    fn crypt_hash(&self, msg: &[u8]) -> Vec<u8>;
 }
-
-// ///
-// pub trait Crypto {
-//     /// Hash type
-//     type Hash;
-//     /// Signature types
-//     type Signature: Crypto;
-//     /// A function to get signature.
-//     fn get_signature(&self) -> Self::Signature;
-//     /// A function to encrypt hash.
-//     fn hash(&self, msg: Vec<u8>) -> Self::Hash;
-//     /// A function to check signature
-//     fn check_signature(
-//         &self,
-//         hash: &Self::Hash,
-//         sig: &Self::Signature,
-//     ) -> Result<(), ConsensusError>;
-//     /// A function to signature the message hash.
-//     fn signature(&self: &Self::Hash, privkey: &[u8]) -> Self::Signature;
-// }
