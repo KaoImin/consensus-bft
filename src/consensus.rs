@@ -5,7 +5,6 @@ use bft::{
     actuator::BftActuator as BFT, BftMsg, Proposal as BftProposal, Status as BftStatus,
     Vote as BftVote,
 };
-use bincode::serialize;
 use blake2b::blake2b as blake2b_hash;
 use crossbeam::crossbeam_channel::{select, unbounded, Receiver, Sender};
 
@@ -33,30 +32,18 @@ impl ConsensusExecutor {
     pub fn new<T: ConsensusSupport + Send + 'static>(
         support: T,
         address: Address,
-        wal_path: &str,
+        wal_path: String,
     ) -> Self {
         let (send, recv) = unbounded();
-        let mut executor = Consensus::new(support, address, recv, wal_path);
-        thread::spawn(move || loop {
-            select! {
-                recv(executor.bft_recv) -> bft_msg => {
-                    if let Ok(msg) = bft_msg {
-                        executor.inner_process(msg);
-                    }
-                }
-                recv(executor.out_recv) -> out_msg => {
-                    if let Ok(msg) = out_msg {
-                        executor.outer_process(msg);
-                    }
-                }
-            }
-        });
+        Consensus::start(support, address, recv, wal_path);
         ConsensusExecutor(send)
     }
 
     ///
-    pub fn send(&mut self, input: ConsensusInput) -> Result<(), ConsensusError> {
-        self.send(input).map_err(|_| ConsensusError::BlockVerifyDiff)
+    pub fn send(&self, input: ConsensusInput) -> Result<(), ConsensusError> {
+        self.0
+            .send(input)
+            .map_err(|_| ConsensusError::BlockVerifyDiff)
     }
 }
 
@@ -87,12 +74,7 @@ where
     T: ConsensusSupport + Send + 'static,
 {
     ///
-    pub fn new(
-        support: T,
-        address: Address,
-        recv: Receiver<ConsensusInput>,
-        wal_path: &str,
-    ) -> Self {
+    fn new(support: T, address: Address, recv: Receiver<ConsensusInput>, wal_path: String) -> Self {
         let (a, r) = BFT::start(address);
         Consensus {
             bft_recv: r,
@@ -116,19 +98,23 @@ where
         }
     }
 
-    // fn start(&mut self) {
-    //     // self.load_wal_log();
-    //     thread::spawn(move || loop {
-    //         select! {
-    //             recv(self.bft_recv) -> bft_msg => if let Ok(bft_msg) = bft_msg {
-    //             self.inner_process(bft_msg);
-    //         },
-    //             recv(self.out_recv) -> out_msg => if let Ok(out_msg) = out_msg {
-    //             self.outer_process(out_msg);
-    //         },
-    //         }
-    //     });
-    // }
+    ///
+    pub fn start(support: T, address: Address, recv: Receiver<ConsensusInput>, wal_path: String) {
+        // self.load_wal_log();
+        thread::spawn(move || {
+            let mut engine = Consensus::new(support, address, recv, wal_path);
+            loop {
+                select! {
+                    recv(engine.bft_recv) -> bft_msg => if let Ok(bft_msg) = bft_msg {
+                    let _ = engine.inner_process(bft_msg);
+                },
+                    recv(engine.out_recv) -> out_msg => if let Ok(out_msg) = out_msg {
+                    let _ = engine.outer_process(out_msg);
+                },
+                }
+            }
+        });
+    }
 
     fn outer_process(&mut self, msg: ConsensusInput) -> Result<(), ConsensusError> {
         match msg {
@@ -171,7 +157,8 @@ where
                         .entry((hash).to_vec())
                         .or_insert(f.clone().block);
                     self.bft
-                        .send_feed(BftMsg::Feed(f.to_bft_feed(hash.to_vec()))).unwrap();
+                        .send_feed(BftMsg::Feed(f.to_bft_feed(hash.to_vec())))
+                        .unwrap();
                 }
                 Ok(())
             }
@@ -266,9 +253,8 @@ where
             return Err(ConsensusError::BlockVerifyDiff);
         }
         if need_wal {
-            let msg: Vec<u8> =
-                safe_unwrap_result(serialize(&proposal), ConsensusError::BlockVerifyDiff)?;
-            if let Err(_) = self.wal_log.save(height, LOG_TYPE_PROPOSAL, &msg) {
+            let msg = proposal.to_json();
+            if self.wal_log.save(height, LOG_TYPE_PROPOSAL, msg).is_err() {
                 return Err(ConsensusError::BlockVerifyDiff);
             }
         }
@@ -337,9 +323,8 @@ where
             return Err(ConsensusError::BlockVerifyDiff);
         }
         if need_wal {
-            let msg: Vec<u8> =
-                safe_unwrap_result(serialize(&vote), ConsensusError::BlockVerifyDiff)?;
-            if let Err(_) = self.wal_log.save(height, LOG_TYPE_VOTE, &msg) {
+            let msg = vote.to_json();
+            if self.wal_log.save(height, LOG_TYPE_VOTE, msg).is_err() {
                 return Err(ConsensusError::BlockVerifyDiff);
             }
         }
@@ -373,9 +358,8 @@ where
             return Err(ConsensusError::BlockVerifyDiff);
         }
         if need_wal {
-            let msg: Vec<u8> =
-                safe_unwrap_result(serialize(&commit), ConsensusError::BlockVerifyDiff)?;
-            if let Err(_) = self.wal_log.save(height, LOG_TYPE_COMMIT, &msg) {
+            let msg = commit.to_json();
+            if self.wal_log.save(height, LOG_TYPE_COMMIT, msg).is_err() {
                 return Err(ConsensusError::BlockVerifyDiff);
             }
         }
@@ -463,16 +447,22 @@ where
 
         if height >= self.height {
             if height - self.height < collection::CACHE_NUMBER as u64 {
-                // if need_wal {
-                //     let msg: Vec<u8> =
-                //         safe_unwrap_result(msg.try_into(), ConsensusError::MessageTryIntoFailed)?;
-                //     if let Err(_) = self.wal_log.save(height, LOG_TYPE_SIGNED_PROPOSAL, &msg) {
-                //         return Err(ConsensusError::BlockVerifyDiff);
-                //     }
-                // }
-                self.proposals.add(height, round, &msg);
+                if need_wal {
+                    let res = msg.to_json();
+                    if self
+                        .wal_log
+                        .save(height, LOG_TYPE_SIGNED_PROPOSAL, res)
+                        .is_err()
+                    {
+                        return Err(ConsensusError::BlockVerifyDiff);
+                    }
+                }
             }
             if height > self.height {
+                self.proposal_cache
+                    .entry(height)
+                    .or_insert(vec![])
+                    .push(msg);
                 warn!(
                     "The height of signed_proposal is {} which is higher than self.height {}!",
                     height, self.height
@@ -480,6 +470,7 @@ where
                 return Err(ConsensusError::BlockVerifyDiff);
             }
         }
+        self.proposals.add(height, round, &msg);
         let hash = proposal.block.clone();
         let bft_proposal = proposal.to_bft_proposal();
 
@@ -536,17 +527,15 @@ where
 
         if height >= self.height {
             if height - self.height < collection::CACHE_NUMBER as u64 {
-                // if need_wal {
-                //     let msg: Vec<u8> =
-                //         safe_unwrap_result(msg.try_into(), ConsensusError::MessageTryIntoFailed)?;
-                //     if let Err(_) = self.wal_log.save(height, LOG_TYPE_RAW_BYTES, &msg) {
-                //         return Err(ConsensusError::BlockVerifyDiff);
-                //     }
-                // }
-                self.votes
-                    .add(height, round, vote.vote_type, &bft_vote, &msg);
+                if need_wal {
+                    let res = msg.to_json();
+                    if self.wal_log.save(height, LOG_TYPE_RAW_BYTES, res).is_err() {
+                        return Err(ConsensusError::BlockVerifyDiff);
+                    }
+                }
             }
             if height > self.height {
+                self.vote_cache.entry(height).or_insert(vec![]).push(msg);
                 warn!(
                     "The height of raw_bytes is {} which is higher than self.height {}!",
                     height, self.height
@@ -554,7 +543,8 @@ where
                 return Err(ConsensusError::BlockVerifyDiff);
             }
         }
-
+        self.votes
+            .add(height, round, vote.vote_type, &bft_vote, &msg);
         self.check_vote_sender(height, &sender)?;
         Ok(bft_vote)
     }
@@ -569,12 +559,16 @@ where
             );
             return Err(ConsensusError::BlockVerifyDiff);
         }
-        // if need_wal {
-        //     let msg: Vec<u8> = safe_unwrap_result(msg.try_into(), ConsensusError::MessageTryIntoFailed)?;
-        //     if let Err(_) = self.wal_log.save(height + 1, LOG_TYPE_RICH_STATUS, &msg) {
-        //         return Err(ConsensusError::BlockVerifyDiff);
-        //     }
-        // }
+        if need_wal {
+            let msg = rich_status.to_json();
+            if self
+                .wal_log
+                .save(height, LOG_TYPE_RICH_STATUS, msg)
+                .is_err()
+            {
+                return Err(ConsensusError::BlockVerifyDiff);
+            }
+        }
         let pre_hash = rich_status.clone().pre_hash;
         self.pre_hash = Some(pre_hash);
 
@@ -709,7 +703,7 @@ where
         }
         if address.clone().unwrap() != sender {
             error!("The address recovers from the signature is {:?} which is mismatching with the sender {:?}!",
-                &address, 
+                &address,
                 &sender
             );
             return Err(ConsensusError::BlockVerifyDiff);

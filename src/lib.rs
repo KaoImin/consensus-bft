@@ -4,16 +4,13 @@
 #![deny(missing_docs)]
 #![warn(unused_imports)]
 extern crate bft_rs as bft;
-extern crate bincode;
 extern crate blake2b_simd as blake2b;
 extern crate crossbeam;
-extern crate ethereum_types;
 #[macro_use]
 extern crate log;
 extern crate lru_cache;
 extern crate rlp;
-#[macro_use]
-extern crate serde_derive;
+extern crate rustc_serialize;
 
 ///
 pub mod collection;
@@ -25,8 +22,9 @@ pub mod error;
 pub mod wal;
 
 use crate::{consensus::INIT_HEIGHT, error::ConsensusError};
-use bincode::serialize;
 use rlp::{Encodable, RlpStream};
+use rustc_serialize::json::{Json, ToJson};
+use std::collections::BTreeMap;
 use std::collections::HashMap;
 
 ///
@@ -61,12 +59,29 @@ pub enum ConsensusOutput {
 }
 
 ///
-#[derive(Serialize, Deserialize, Clone, Debug, Eq, PartialEq, Hash)]
+#[derive(RustcDecodable, RustcEncodable, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum VoteType {
     ///
     Prevote,
     ///
     Precommit,
+}
+
+impl ToJson for VoteType {
+    fn to_json(&self) -> Json {
+        let mut d = BTreeMap::new();
+        let mut t: u8 = 1;
+        match self {
+            VoteType::Prevote => t = 0,
+            VoteType::Precommit => t = 1,
+        }
+        if t == 0 {
+            d.insert("Prevote".to_string(), t.to_json());
+        } else {
+            d.insert("Precommit".to_string(), t.to_json());
+        }
+        Json::Object(d)
+    }
 }
 
 impl Into<u8> for VoteType {
@@ -79,22 +94,22 @@ impl Into<u8> for VoteType {
 }
 
 ///
-#[derive(Clone, Debug, Eq, PartialEq, Hash)]
-pub struct Message {
-    mtype: String,
-    msg: Vec<u8>,
-}
+// #[derive(Clone, Debug, Eq, PartialEq, Hash)]
+// pub struct Message {
+//     mtype: String,
+//     msg: Vec<u8>,
+// }
 
-impl Message {
-    pub(crate) fn from_proposal(signed_proposal: SignedProposal) -> Message {
-        Message {
-            mtype: "SignedProposal".to_string(),
-            msg: serialize(&signed_proposal).expect("Serialize SignedProposal Fail!"),
-        }
-    }
-}
+// impl Message {
+//     pub(crate) fn from_proposal(signed_proposal: SignedProposal) -> Message {
+//         Message {
+//             mtype: "SignedProposal".to_string(),
+//             msg: serialize(&signed_proposal).expect("Serialize SignedProposal Fail!"),
+//         }
+//     }
+// }
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(RustcDecodable, RustcEncodable, Clone, Debug, PartialEq, Eq)]
 ///
 pub struct SignedProposal {
     ///
@@ -103,8 +118,17 @@ pub struct SignedProposal {
     pub signature: Vec<u8>,
 }
 
+impl ToJson for SignedProposal {
+    fn to_json(&self) -> Json {
+        let mut d = BTreeMap::new();
+        d.insert("proposal".to_string(), self.proposal.to_json());
+        d.insert("signature".to_string(), self.signature.to_json());
+        Json::Object(d)
+    }
+}
+
 ///
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(RustcDecodable, RustcEncodable, Clone, Debug, PartialEq, Eq)]
 pub struct Proposal {
     ///
     pub height: u64,
@@ -120,6 +144,20 @@ pub struct Proposal {
     pub lock_votes: Vec<SignedVote>,
     ///
     pub proposer: Address,
+}
+
+impl ToJson for Proposal {
+    fn to_json(&self) -> Json {
+        let mut d = BTreeMap::new();
+        d.insert("height".to_string(), self.height.to_json());
+        d.insert("round".to_string(), self.round.to_json());
+        d.insert("block".to_string(), self.block.to_json());
+        d.insert("proof".to_string(), self.proof.to_json());
+        d.insert("lock round".to_string(), self.lock_round.to_json());
+        d.insert("lock votes".to_string(), self.lock_votes.to_json());
+        d.insert("proposer".to_string(), self.proposer.to_json());
+        Json::Object(d)
+    }
 }
 
 impl Encodable for Proposal {
@@ -158,7 +196,7 @@ impl Proposal {
 }
 
 ///
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(RustcDecodable, RustcEncodable, Clone, Debug, PartialEq, Eq)]
 pub struct SignedVote {
     ///
     pub vote: Vote,
@@ -172,8 +210,17 @@ impl Encodable for SignedVote {
     }
 }
 
+impl ToJson for SignedVote {
+    fn to_json(&self) -> Json {
+        let mut d = BTreeMap::new();
+        d.insert("vote".to_string(), self.vote.to_json());
+        d.insert("signature".to_string(), self.signature.to_json());
+        Json::Object(d)
+    }
+}
+
 ///
-#[derive(Serialize, Deserialize, Clone, Debug, Eq, PartialEq)]
+#[derive(RustcDecodable, RustcEncodable, Clone, Debug, Eq, PartialEq)]
 pub struct Vote {
     ///
     pub vote_type: VoteType,
@@ -185,6 +232,18 @@ pub struct Vote {
     pub block_hash: Hash,
     ///
     pub voter: Address,
+}
+
+impl ToJson for Vote {
+    fn to_json(&self) -> Json {
+        let mut d = BTreeMap::new();
+        d.insert("vote type".to_string(), self.vote_type.to_json());
+        d.insert("height".to_string(), self.height.to_json());
+        d.insert("round".to_string(), self.round.to_json());
+        d.insert("block hash".to_string(), self.block_hash.to_json());
+        d.insert("voter".to_string(), self.voter.to_json());
+        Json::Object(d)
+    }
 }
 
 impl Encodable for Vote {
@@ -227,7 +286,7 @@ impl Vote {
 }
 
 ///
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(RustcDecodable, RustcEncodable, Clone, Debug, PartialEq, Eq)]
 pub struct Commit {
     ///
     pub height: u64,
@@ -241,8 +300,20 @@ pub struct Commit {
     pub address: Address,
 }
 
+impl ToJson for Commit {
+    fn to_json(&self) -> Json {
+        let mut d = BTreeMap::new();
+        d.insert("height".to_string(), self.height.to_json());
+        d.insert("block".to_string(), self.block.to_json());
+        d.insert("prev hash".to_string(), self.pre_hash.to_json());
+        d.insert("proof".to_string(), self.proof.to_json());
+        d.insert("address".to_string(), self.address.to_json());
+        Json::Object(d)
+    }
+}
+
 ///
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(RustcDecodable, RustcEncodable, Clone, Debug, PartialEq, Eq)]
 pub struct Status {
     ///
     pub height: u64,
@@ -252,6 +323,17 @@ pub struct Status {
     pub interval: Option<u64>,
     ///
     pub authority_list: Vec<Node>,
+}
+
+impl ToJson for Status {
+    fn to_json(&self) -> Json {
+        let mut d = BTreeMap::new();
+        d.insert("height".to_string(), self.height.to_json());
+        d.insert("prev hash".to_string(), self.pre_hash.to_json());
+        d.insert("interval".to_string(), self.interval.to_json());
+        d.insert("authority list".to_string(), self.authority_list.to_json());
+        Json::Object(d)
+    }
 }
 
 impl Status {
@@ -277,6 +359,15 @@ pub struct Feed {
     pub block: Vec<u8>,
 }
 
+impl ToJson for Feed {
+    fn to_json(&self) -> Json {
+        let mut d = BTreeMap::new();
+        d.insert("height".to_string(), self.height.to_json());
+        d.insert("block".to_string(), self.block.to_json());
+        Json::Object(d)
+    }
+}
+
 impl Feed {
     pub(crate) fn to_bft_feed(&self, proposal: Vec<u8>) -> bft::Feed {
         bft::Feed {
@@ -293,6 +384,15 @@ pub struct VerifyResp {
     pub is_pass: bool,
     ///
     pub block_hash: Hash,
+}
+
+impl ToJson for VerifyResp {
+    fn to_json(&self) -> Json {
+        let mut d = BTreeMap::new();
+        d.insert("is pass".to_string(), self.is_pass.to_json());
+        d.insert("block hash".to_string(), self.block_hash.to_json());
+        Json::Object(d)
+    }
 }
 
 impl VerifyResp {
@@ -315,6 +415,16 @@ pub struct AuthorityManage {
     pub authority_h_old: u64,
 }
 
+impl ToJson for AuthorityManage {
+    fn to_json(&self) -> Json {
+        let mut d = BTreeMap::new();
+        d.insert("authority".to_string(), self.authorities.to_json());
+        d.insert("authority old".to_string(), self.authorities_old.to_json());
+        d.insert("old height".to_string(), self.authority_h_old.to_json());
+        Json::Object(d)
+    }
+}
+
 impl Default for AuthorityManage {
     fn default() -> Self {
         AuthorityManage {
@@ -335,7 +445,7 @@ impl AuthorityManage {
 }
 
 ///
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(RustcDecodable, RustcEncodable, Clone, Debug, PartialEq, Eq)]
 pub struct Node {
     ///
     pub address: Address,
@@ -343,6 +453,19 @@ pub struct Node {
     pub proposal_weight: u32,
     ///
     pub vote_weight: u32,
+}
+
+impl ToJson for Node {
+    fn to_json(&self) -> Json {
+        let mut d = BTreeMap::new();
+        d.insert("address".to_string(), self.address.to_json());
+        d.insert(
+            "proposal weight".to_string(),
+            self.proposal_weight.to_json(),
+        );
+        d.insert("vote weight".to_string(), self.vote_weight.to_json());
+        Json::Object(d)
+    }
 }
 
 impl Node {
@@ -357,7 +480,7 @@ impl Node {
 }
 
 ///
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[derive(RustcDecodable, RustcEncodable, Clone, Debug, PartialEq, Eq)]
 pub struct Proof {
     ///
     pub block_hash: Hash,
@@ -367,6 +490,20 @@ pub struct Proof {
     pub round: u64,
     ///
     pub precommit_votes: HashMap<Address, Vec<u8>>,
+}
+
+impl ToJson for Proof {
+    fn to_json(&self) -> Json {
+        let mut d = BTreeMap::new();
+        d.insert("block hash".to_string(), self.block_hash.to_json());
+        d.insert("height".to_string(), self.height.to_json());
+        d.insert("round".to_string(), self.round.to_json());
+        for (send, sig) in self.precommit_votes.iter() {
+            d.insert("sender".to_string(), send.to_json());
+            d.insert("signature".to_string(), sig.to_json());
+        }
+        Json::Object(d)
+    }
 }
 
 impl Encodable for Proof {

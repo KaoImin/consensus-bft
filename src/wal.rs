@@ -1,3 +1,4 @@
+use rustc_serialize::json::{encode, Json};
 use std::collections::BTreeMap;
 use std::fs::{read_dir, DirBuilder, File, OpenOptions};
 use std::io::{self, Read, Seek, Write};
@@ -14,7 +15,8 @@ pub(crate) struct Wal {
 }
 
 impl Wal {
-    pub(crate) fn new(dir: &str) -> Result<Wal, io::Error> {
+    pub(crate) fn new(dir: String) -> Result<Wal, io::Error> {
+        let dir = dir.as_str();
         let fss = read_dir(&dir);
         if fss.is_err() {
             DirBuilder::new()
@@ -107,7 +109,7 @@ impl Wal {
         Ok(())
     }
 
-    pub fn save(&mut self, height: u64, mtype: u8, msg: &[u8]) -> io::Result<u64> {
+    pub fn save(&mut self, height: u64, mtype: u8, msg: Json) -> io::Result<u64> {
         trace!("Wal save mtype: {}, height: {}", mtype, height);
         if !self.height_fs.contains_key(&height) {
             // 2 more higher than current height, do not process it
@@ -123,10 +125,13 @@ impl Wal {
                 self.height_fs.insert(height, fs);
             }
         }
-        let mlen = msg.len() as u32;
-        if mlen == 0 {
+
+        if msg.is_null() {
             return Ok(0);
         }
+
+        let msg = encode(&msg).expect("encode wal msg error");
+        let mlen = msg.len() as u32;
 
         let mut hlen = 0;
         if let Some(fs) = self.height_fs.get_mut(&height) {
@@ -135,7 +140,7 @@ impl Wal {
             fs.seek(io::SeekFrom::End(0))?;
             fs.write_all(&len_bytes[..])?;
             fs.write_all(&type_bytes[..])?;
-            hlen = fs.write(msg)?;
+            hlen = fs.write(msg.as_bytes())?;
             fs.flush()?;
         } else {
             warn!("Can't find wal log in height {} ", height);
