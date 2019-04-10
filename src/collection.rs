@@ -176,11 +176,11 @@ impl ProposalCollector {
         }
     }
 
-    pub(crate) fn get_proposal(&mut self, height: u64, round: u64) -> Option<SignedProposal> {
-        self.proposals
-            .get_mut(&height)
-            .and_then(|prc| prc.get_proposal(round))
-    }
+    // ub(crate) fn get_proposal(&mut self, height: u64, round: u64) -> Option<SignedProposal> {
+    //     self.proposals
+    //         .get_mut(&height)
+    //         .and_then(|prc| prc.get_proposal(round))
+    // }
 }
 
 #[derive(Clone, Debug)]
@@ -204,7 +204,7 @@ impl ProposalRoundCollector {
         }
     }
 
-    pub(crate) fn get_proposal(&mut self, round: u64) -> Option<SignedProposal> {
-        self.round_proposals.get_mut(&round).cloned()
-    }
+    //     pub(crate) fn get_proposal(&mut self, round: u64) -> Option<SignedProposal> {
+    //         self.round_proposals.get_mut(&round).cloned()
+    //     }
 }

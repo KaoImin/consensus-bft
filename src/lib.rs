@@ -41,8 +41,8 @@ pub enum ConsensusInput {
     Status(Status),
     ///
     VerifyResp(VerifyResp),
-    ///
-    Feed(Feed),
+    // ///
+    // Feed(Feed),
     ///
     Pause,
     ///
@@ -116,7 +116,7 @@ impl Encodable for Proposal {
 }
 
 impl Proposal {
-    pub(crate) fn to_bft_proposal(&self) -> bft::Proposal {
+    pub(crate) fn to_bft_proposal(&self, hash: Vec<u8>) -> bft::Proposal {
         let lock_votes = if self.lock_round.is_some() {
             let mut res = Vec::new();
             for vote in self.lock_votes.iter() {
@@ -130,7 +130,7 @@ impl Proposal {
         bft::Proposal {
             height: self.height,
             round: self.round,
-            content: self.block.clone(),
+            content: hash,
             lock_round: self.lock_round,
             lock_votes,
             proposer: self.proposer.clone(),
@@ -376,11 +376,11 @@ pub struct LockStatus {
 ///
 pub trait ConsensusSupport {
     ///
-    fn get_block(&self) -> Result<(), ConsensusError>;
+    fn get_block(&self, height: u64) -> Result<Feed, ConsensusError>;
     ///
     fn transmit(&self, msg: ConsensusOutput) -> Result<bool, ConsensusError>;
     ///
-    fn check_block(&self, block: &[u8]) -> Result<bool, ConsensusError>;
+    fn check_block(&self, block: &[u8]) -> bool;
     ///
     fn commit(&self, commit: Commit) -> Result<(), ConsensusError>;
     ///
