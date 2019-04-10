@@ -7,13 +7,15 @@ license = "MIT"
 
 [dependencies]
 arraymap = "0.1.1"
-bft-rs = { git = "https://github.com/KaoImin/bft-rs.git", rev = "0021f60437a8f6a84be384f5c746eddd5ddfa1b6" }
-blake2b_simd = "0.4.1"
+bft-rs = { git = "https://github.com/KaoImin/bft-rs.git", rev = "5102f3fcbd50f81bf0b4ea46a7d2864cc0d6711b" }
 crossbeam = "0.7"
-rustc-serialize = "0.3"
+hex = "0.3.2"
 log = "0.4.3"
 lru-cache = "0.1"
 rlp = "0.3.0"
+serde = "1.0"
+serde_json = "1.0"
+serde_derive = "1.0"
 
 [features]
 default = ["verify_req"]

@@ -1,4 +1,3 @@
-use rustc_serialize::json::{encode, Json};
 use std::collections::BTreeMap;
 use std::fs::{read_dir, DirBuilder, File, OpenOptions};
 use std::io::{self, Read, Seek, Write};
@@ -109,7 +108,7 @@ impl Wal {
         Ok(())
     }
 
-    pub fn save(&mut self, height: u64, mtype: u8, msg: Json) -> io::Result<u64> {
+    pub fn save(&mut self, height: u64, mtype: u8, msg: String) -> io::Result<u64> {
         trace!("Wal save mtype: {}, height: {}", mtype, height);
         if !self.height_fs.contains_key(&height) {
             // 2 more higher than current height, do not process it
@@ -126,13 +125,11 @@ impl Wal {
             }
         }
 
-        if msg.is_null() {
+        if msg.is_empty() {
             return Ok(0);
         }
 
-        let msg = encode(&msg).expect("encode wal msg error");
         let mlen = msg.len() as u32;
-
         let mut hlen = 0;
         if let Some(fs) = self.height_fs.get_mut(&height) {
             let len_bytes: [u8; 4] = unsafe { transmute(mlen.to_le()) };
