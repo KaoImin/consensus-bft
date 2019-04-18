@@ -1,13 +1,13 @@
-use crate::{ConsensusSupport, collection::*, error::ConsensusError, types::*, wal::Wal};
-
-use bft::{
+use crate::{collection::*, error::ConsensusError, types::*, wal::Wal, ConsensusSupport};
+use bft_rs as bft;
+use bft_rs::{
     actuator::BftActuator as BFT, BftMsg, Commit as BftCommit, Feed as BftFeed,
     Proposal as BftProposal, Status as BftStatus, VerifyResp as BftVerifyResp, Vote as BftVote,
 };
 use crossbeam::crossbeam_channel::{select, unbounded, Receiver, Sender};
+use log::{error, warn, info};
 use rlp::Encodable;
 use serde_json::to_string;
-
 use std::collections::HashMap;
 use std::thread;
 
@@ -558,7 +558,7 @@ where
         let hash = self.function.crypt_hash(&msg.rlp_bytes());
         let address = self.function.check_signature(&sig, &hash);
         if address.is_none() {
-            return Err(ConsensusError::BlockVerifyDiff);    
+            return Err(ConsensusError::BlockVerifyDiff);
         }
 
         let height = vote.height;

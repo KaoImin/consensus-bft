@@ -1,5 +1,7 @@
 use crate::consensus::INIT_HEIGHT;
+use bft_rs as bft;
 use rlp::{Encodable, RlpStream};
+use serde::{Serialize, Deserialize};
 use std::collections::HashMap;
 
 ///
@@ -334,12 +336,17 @@ pub struct Proof {
 
 impl Encodable for Proof {
     fn rlp_append(&self, s: &mut RlpStream) {
-        let tmp = self.precommit_votes.clone();
         s.append_list(&self.block_hash)
             .append(&self.height)
             .append(&self.round);
-        for (k, v) in tmp.iter() {
-            s.append_list(&k).append_list(&v);
+
+        let votes = &self
+            .precommit_votes
+            .iter()
+            .map(|(k, v)| (k.to_vec(), v.to_vec()))
+            .collect::<Vec<_>>();
+        for v in votes.iter() {
+            s.append(&v.0).append(&v.1);
         }
     }
 }

@@ -1,5 +1,5 @@
 use crate::types::{SignedProposal, SignedVote, VoteType};
-use bft::Vote as BftVote;
+use bft_rs::Vote as BftVote;
 
 use lru_cache::LruCache;
 use std::collections::HashMap;

@@ -4,18 +4,9 @@
 #![deny(missing_docs)]
 #![warn(unused_imports)]
 #![warn(dead_code)]
-extern crate bft_rs as bft;
-extern crate crossbeam;
-#[macro_use]
-extern crate log;
-extern crate lru_cache;
-extern crate rlp;
-extern crate serde_json;
-#[macro_use]
-extern crate serde_derive;
 
 use crate::error::ConsensusError;
-use crate::types::{Address, ConsensusOutput, Commit, Feed};
+use crate::types::{Address, Commit, ConsensusOutput, Feed};
 
 ///
 pub trait ConsensusSupport {

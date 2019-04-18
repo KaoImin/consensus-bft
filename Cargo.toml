@@ -13,7 +13,7 @@ crossbeam = "0.7"
 log = "0.4.3"
 lru-cache = "0.1"
 rlp = "0.3.0"
-serde = "1.0"
+serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_derive = "1.0"
 
@@ -25,10 +25,6 @@ rand = "0.5.5"
 [features]
 default = ["verify_req"]
 verify_req = ["bft-rs/verify_req"]
-
-[[test]]
-path = "test/test.rs"
-name = "default"
 
 [[bench]]
 name = "example"
