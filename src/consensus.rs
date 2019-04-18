@@ -1,12 +1,12 @@
-use crate::*;
-use crate::{collection::*, error::ConsensusError, wal::Wal};
+use crate::{ConsensusSupport, collection::*, error::ConsensusError, types::*, wal::Wal};
 
 use bft::{
     actuator::BftActuator as BFT, BftMsg, Commit as BftCommit, Feed as BftFeed,
     Proposal as BftProposal, Status as BftStatus, VerifyResp as BftVerifyResp, Vote as BftVote,
 };
 use crossbeam::crossbeam_channel::{select, unbounded, Receiver, Sender};
-use serde_json::{from_slice, to_string};
+use rlp::Encodable;
+use serde_json::to_string;
 
 use std::collections::HashMap;
 use std::thread;
@@ -25,6 +25,7 @@ const LOG_TYPE_VOTE: u8 = 7;
 const LOG_TYPE_COMMIT: u8 = 8;
 
 ///
+#[derive(Clone, Debug)]
 pub struct ConsensusExecutor(Sender<ConsensusInput>);
 
 impl ConsensusExecutor {
@@ -32,10 +33,10 @@ impl ConsensusExecutor {
     pub fn new<T: ConsensusSupport + Send + 'static>(
         support: T,
         address: Address,
-        wal_path: String,
+        wal_path: &str,
     ) -> Self {
         let (send, recv) = unbounded();
-        Consensus::start(support, address, recv, wal_path);
+        Consensus::start(support, address, recv, wal_path.to_string());
         ConsensusExecutor(send)
     }
 
@@ -107,11 +108,11 @@ where
             loop {
                 select! {
                     recv(engine.bft_recv) -> bft_msg => if let Ok(bft_msg) = bft_msg {
-                    let _ = engine.inner_process(bft_msg);
-                },
+                        let _ = engine.inner_process(bft_msg);
+                    },
                     recv(engine.out_recv) -> out_msg => if let Ok(out_msg) = out_msg {
-                    let _ = engine.outer_process(out_msg);
-                },
+                        let _ = engine.outer_process(out_msg);
+                    },
                 }
             }
         });
@@ -120,6 +121,7 @@ where
     fn outer_process(&mut self, msg: ConsensusInput) -> Result<(), ConsensusError> {
         match msg {
             ConsensusInput::SignedProposal(sp) => {
+                info!("receive signed proposal");
                 let (proposal, verify_resp) = self.handle_signed_proposal(sp, true)?;
                 self.bft
                     .send_proposal(BftMsg::Proposal(proposal))
@@ -132,6 +134,7 @@ where
                 Ok(())
             }
             ConsensusInput::SignedVote(sv) => {
+                info!("receive signed vote");
                 let vote = self.handle_signed_vote(sv, true)?;
                 self.bft
                     .send_vote(BftMsg::Vote(vote))
@@ -139,6 +142,7 @@ where
                 Ok(())
             }
             ConsensusInput::Status(rs) => {
+                info!("receive status");
                 let status = self.handle_rich_status(rs, true)?;
                 self.bft.send_status(BftMsg::Status(status)).unwrap();
                 let height = self.height;
@@ -149,38 +153,23 @@ where
                 self.send_cache_vote(height)?;
                 Ok(())
             }
-            // ConsensusInput::Feed(f) => {
-            //     let block = f.block.clone();
-            //     let height = f.height;
-            //     if height < self.height {
-            //         return Err(ConsensusError::BlockVerifyDiff);
-            //     } else if height == self.height {
-            //         let hash = self.function.crypt_hash(&block);
-            //         self.block_cache
-            //             .entry((hash).to_vec())
-            //             .or_insert(f.clone().block);
-            //         self.bft
-            //             .send_feed(BftMsg::Feed(f.to_bft_feed(hash.to_vec())))
-            //             .unwrap();
+            // ConsensusInput::VerifyResp(r) => {
+            //     let verify_resp = self.handle_verify_block_resp(r, true)?;
+            //     info!(
+            //         "Cita-bft hands over verify_resp to bft-rs!\n{:?}",
+            //         verify_resp
+            //     );
+            //     let _ = self
+            //         .bft
+            //         .send_verify(BftMsg::VerifyResp(verify_resp.clone()));
+            //     if !verify_resp.is_pass {
+            //         let block = self.function.get_block(self.height)?;
+            //         let feed = self.handle_block_txs(block, true)?;
+            //         let _ = self.bft.send_feed(BftMsg::Feed(feed));
             //     }
             //     Ok(())
             // }
-            ConsensusInput::VerifyResp(r) => {
-                let verify_resp = self.handle_verify_block_resp(r, true)?;
-                info!(
-                    "Cita-bft hands over verify_resp to bft-rs!\n{:?}",
-                    verify_resp
-                );
-                let _ = self
-                    .bft
-                    .send_verify(BftMsg::VerifyResp(verify_resp.clone()));
-                if !verify_resp.is_pass {
-                    let block = self.function.get_block(self.height)?;
-                    let feed = self.handle_block_txs(block, true)?;
-                    let _ = self.bft.send_feed(BftMsg::Feed(feed));
-                }
-                Ok(())
-            }
+
             // ConsensusInput::Feed(f) => {
             //     let feed = self.handle_block_txs(f, true)?;
             //     self.bft.send_feed(BftMsg::Feed(feed)).expect("");
@@ -198,23 +187,27 @@ where
                     .expect("send command fail");
                 Ok(())
             }
+            _ => panic!("invialid type"),
         }
     }
 
     fn inner_process(&mut self, msg: BftMsg) -> Result<(), ConsensusError> {
         match msg {
             BftMsg::Proposal(p) => {
+                info!("receive proposal");
                 let sp = self.handle_proposal(p, true)?;
                 self.function
                     .transmit(ConsensusOutput::SignedProposal(sp))?;
                 Ok(())
             }
             BftMsg::Vote(v) => {
+                info!("receive vote");
                 let sv = self.handle_vote(v, true)?;
                 self.function.transmit(ConsensusOutput::SignedVote(sv))?;
                 Ok(())
             }
             BftMsg::Commit(c) => {
+                info!("receive commit");
                 let commit = self.handle_commit(c, true)?;
                 self.function.commit(commit)?;
                 Ok(())
@@ -501,6 +494,9 @@ where
         }
         let block = proposal.block.clone();
         let hash = self.function.crypt_hash(&block);
+        self.block_cache
+            .entry(hash.clone())
+            .or_insert(block.clone());
 
         let verify_resp: bool;
         if let Some(res) = self.verified_block.get(&hash) {
@@ -510,7 +506,7 @@ where
         }
 
         if height >= self.height {
-            if height - self.height < collection::CACHE_NUMBER as u64 && need_wal {
+            if height - self.height < CACHE_NUMBER as u64 && need_wal {
                 if let Ok(res) = to_string(&msg) {
                     if self
                         .wal_log
@@ -540,7 +536,7 @@ where
         let bft_proposal = proposal.to_bft_proposal(hash);
 
         self.check_proposer(height, round, &address.unwrap())?;
-        self.check_lock_votes(&msg, block.clone())?;
+        self.check_lock_votes(&msg, block)?;
 
         let verify_resp = VerifyResp {
             is_pass: verify_resp,
@@ -562,7 +558,7 @@ where
         let hash = self.function.crypt_hash(&msg.rlp_bytes());
         let address = self.function.check_signature(&sig, &hash);
         if address.is_none() {
-            return Err(ConsensusError::BlockVerifyDiff);
+            return Err(ConsensusError::BlockVerifyDiff);    
         }
 
         let height = vote.height;
@@ -584,7 +580,7 @@ where
         let bft_vote = vote.to_bft_vote();
 
         if height >= self.height {
-            if height - self.height < collection::CACHE_NUMBER as u64 && need_wal {
+            if height - self.height < CACHE_NUMBER as u64 && need_wal {
                 if let Ok(res) = to_string(&msg) {
                     if self.wal_log.save(height, LOG_TYPE_RAW_BYTES, res).is_err() {
                         return Err(ConsensusError::BlockVerifyDiff);
@@ -917,115 +913,115 @@ where
     }
 
     fn load_wal_log(&mut self) {
-        info!("Cita-bft starts to load wal log!");
-        let vec_buf = self.wal_log.load();
-        for (msg_type, msg) in vec_buf {
-            match msg_type {
-                LOG_TYPE_SIGNED_PROPOSAL => {
-                    info!("Cita-bft loads signed_proposal!");
-                    let msg: SignedProposal = from_slice(&msg).expect("Try from message failed!");
-                    if let Ok((proposal, verify_resp)) = self.handle_signed_proposal(msg, false) {
-                        info!(
-                            "Cita-bft hands over bft_proposal to bft-rs!\n{:?}",
-                            proposal
-                        );
-                        self.bft
-                            .send_proposal(BftMsg::Proposal(proposal))
-                            .expect("Cita-bft hands over bft_proposal failed!");
-                        if let Some(verify_resp) = verify_resp {
-                            info!(
-                                "Cita-bft hands over verify_resp to bft-rs!\n{:?}",
-                                verify_resp
-                            );
-                            self.bft
-                                .send_verify(BftMsg::VerifyResp(verify_resp.to_bft_resp()))
-                                .expect("Cita-bft hands over verify_resp failed!");
-                        }
-                    };
-                }
-                LOG_TYPE_RAW_BYTES => {
-                    info!("Cita-bft loads raw_bytes message!");
-                    let msg: SignedVote = from_slice(&msg).expect("Try from message failed!");
-                    if let Ok(vote) = self.handle_signed_vote(msg, false) {
-                        info!("Cita-bft hands over bft_vote to bft-rs!\n{:?}", vote);
-                        self.bft
-                            .send_vote(BftMsg::Vote(vote))
-                            .expect("Cita-bft hands over bft_vote failed!");
-                    };
-                }
-                LOG_TYPE_RICH_STATUS => {
-                    info!("Cita-bft loads rich_status message!");
-                    let msg: Status = from_slice(&msg).expect("Try from message failed!");
-                    if let Ok(status) = self.handle_rich_status(msg, false) {
-                        info!("Cita-bft hands over bft_status to bft-rs!\n{:?}", status);
-                        self.bft
-                            .send_status(BftMsg::Status(status))
-                            .expect("Cita-bft hands over bft_status failed!");
-                    };
-                }
-                // LOG_TYPE_BLOCK_TXS => {
-                //     info!("Cita-bft loads block_txs message!");
-                //     let msg: Feed = from_slice(&msg).expect("Try from message failed!");
-                //     if let Ok(feed) = self.handle_block_txs(msg, false) {
-                //         info!("Cita-bft hands over bft_feed to bft-rs!\n{:?}", feed);
-                //         self.bft
-                //             .send_feed(BftMsg::Feed(feed))
-                //             .expect("Cita-bft hands over bft_feed failed!");
-                //     };
-                // }
-                LOG_TYPE_VERIFY_BLOCK_PESP => {
-                    info!("Cita-bft loads verify_block_resp message!");
-                    let msg: VerifyResp = from_slice(&msg).expect("Try from message failed!");
-                    if let Ok(verify_resp) = self.handle_verify_block_resp(msg, false) {
-                        info!(
-                            "Cita-bft hands over verify_resp to bft-rs!\n{:?}",
-                            verify_resp
-                        );
-                        self.bft
-                            .send_verify(BftMsg::VerifyResp(verify_resp))
-                            .expect("Cita-bft hands over verify_resp failed!");
-                    };
-                }
-                LOG_TYPE_PROPOSAL => {
-                    info!("Cita-bft loads bft_proposal message!");
-                    let proposal: BftProposal =
-                        from_slice(&msg).expect("Deserialize message failed!");
-                    if let Ok(signed_proposal) = self.handle_proposal(proposal.clone(), false) {
-                        info!(
-                            "Cita-bft sends signed_proposal to rabbit_mq!\n{:?}",
-                            proposal
-                        );
-                        self.function
-                            .transmit(ConsensusOutput::SignedProposal(signed_proposal))
-                            .expect("Cita-bft sends signed_proposal failed!");;
-                    };
-                }
-                LOG_TYPE_VOTE => {
-                    info!("Cita-bft loads bft_vote message!");
-                    let vote: BftVote = from_slice(&msg).expect("Deserialize message failed!");
-                    if let Ok(raw_bytes) = self.handle_vote(vote.clone(), false) {
-                        info!("Cita-bft sends raw_bytes to rabbit_mq!\n{:?}", vote);
-                        self.function
-                            .transmit(ConsensusOutput::SignedVote(raw_bytes))
-                            .expect("Cita-bft sends raw_bytes failed!");
-                    };
-                }
-                LOG_TYPE_COMMIT => {
-                    info!("Cita-bft loads bft_commit message!");
-                    let commit: BftCommit = from_slice(&msg).expect("Deserialize message failed!");
-                    if let Ok(block_with_proof) = self.handle_commit(commit.clone(), true) {
-                        info!(
-                            "Cita-bft sends block_with_proof to rabbit_mq!\n{:?}",
-                            commit
-                        );
-                        self.function
-                            .commit(block_with_proof)
-                            .expect("Cita-bft sends block_with_proof failed!");
-                    };
-                }
-                _ => {}
-            }
-        }
+        // info!("Cita-bft starts to load wal log!");
+        // let vec_buf = self.wal_log.load();
+        // for (msg_type, msg) in vec_buf {
+        //     match msg_type {
+        //         LOG_TYPE_SIGNED_PROPOSAL => {
+        //             info!("Cita-bft loads signed_proposal!");
+        //             let msg: SignedProposal = from_slice(&msg).expect("Try from message failed!");
+        //             if let Ok((proposal, verify_resp)) = self.handle_signed_proposal(msg, false) {
+        //                 info!(
+        //                     "Cita-bft hands over bft_proposal to bft-rs!\n{:?}",
+        //                     proposal
+        //                 );
+        //                 self.bft
+        //                     .send_proposal(BftMsg::Proposal(proposal))
+        //                     .expect("Cita-bft hands over bft_proposal failed!");
+        //                 if let Some(verify_resp) = verify_resp {
+        //                     info!(
+        //                         "Cita-bft hands over verify_resp to bft-rs!\n{:?}",
+        //                         verify_resp
+        //                     );
+        //                     self.bft
+        //                         .send_verify(BftMsg::VerifyResp(verify_resp.to_bft_resp()))
+        //                         .expect("Cita-bft hands over verify_resp failed!");
+        //                 }
+        //             };
+        //         }
+        //         LOG_TYPE_RAW_BYTES => {
+        //             info!("Cita-bft loads raw_bytes message!");
+        //             let msg: SignedVote = from_slice(&msg).expect("Try from message failed!");
+        //             if let Ok(vote) = self.handle_signed_vote(msg, false) {
+        //                 info!("Cita-bft hands over bft_vote to bft-rs!\n{:?}", vote);
+        //                 self.bft
+        //                     .send_vote(BftMsg::Vote(vote))
+        //                     .expect("Cita-bft hands over bft_vote failed!");
+        //             };
+        //         }
+        //         LOG_TYPE_RICH_STATUS => {
+        //             info!("Cita-bft loads rich_status message!");
+        //             let msg: Status = from_slice(&msg).expect("Try from message failed!");
+        //             if let Ok(status) = self.handle_rich_status(msg, false) {
+        //                 info!("Cita-bft hands over bft_status to bft-rs!\n{:?}", status);
+        //                 self.bft
+        //                     .send_status(BftMsg::Status(status))
+        //                     .expect("Cita-bft hands over bft_status failed!");
+        //             };
+        //         }
+        //         // LOG_TYPE_BLOCK_TXS => {
+        //         //     info!("Cita-bft loads block_txs message!");
+        //         //     let msg: Feed = from_slice(&msg).expect("Try from message failed!");
+        //         //     if let Ok(feed) = self.handle_block_txs(msg, false) {
+        //         //         info!("Cita-bft hands over bft_feed to bft-rs!\n{:?}", feed);
+        //         //         self.bft
+        //         //             .send_feed(BftMsg::Feed(feed))
+        //         //             .expect("Cita-bft hands over bft_feed failed!");
+        //         //     };
+        //         // }
+        //         LOG_TYPE_VERIFY_BLOCK_PESP => {
+        //             info!("Cita-bft loads verify_block_resp message!");
+        //             let msg: VerifyResp = from_slice(&msg).expect("Try from message failed!");
+        //             if let Ok(verify_resp) = self.handle_verify_block_resp(msg, false) {
+        //                 info!(
+        //                     "Cita-bft hands over verify_resp to bft-rs!\n{:?}",
+        //                     verify_resp
+        //                 );
+        //                 self.bft
+        //                     .send_verify(BftMsg::VerifyResp(verify_resp))
+        //                     .expect("Cita-bft hands over verify_resp failed!");
+        //             };
+        //         }
+        //         LOG_TYPE_PROPOSAL => {
+        //             info!("Cita-bft loads bft_proposal message!");
+        //             let proposal: BftProposal =
+        //                 from_slice(&msg).expect("Deserialize message failed!");
+        //             if let Ok(signed_proposal) = self.handle_proposal(proposal.clone(), false) {
+        //                 info!(
+        //                     "Cita-bft sends signed_proposal to rabbit_mq!\n{:?}",
+        //                     proposal
+        //                 );
+        //                 self.function
+        //                     .transmit(ConsensusOutput::SignedProposal(signed_proposal))
+        //                     .expect("Cita-bft sends signed_proposal failed!");;
+        //             };
+        //         }
+        //         LOG_TYPE_VOTE => {
+        //             info!("Cita-bft loads bft_vote message!");
+        //             let vote: BftVote = from_slice(&msg).expect("Deserialize message failed!");
+        //             if let Ok(raw_bytes) = self.handle_vote(vote.clone(), false) {
+        //                 info!("Cita-bft sends raw_bytes to rabbit_mq!\n{:?}", vote);
+        //                 self.function
+        //                     .transmit(ConsensusOutput::SignedVote(raw_bytes))
+        //                     .expect("Cita-bft sends raw_bytes failed!");
+        //             };
+        //         }
+        //         LOG_TYPE_COMMIT => {
+        //             info!("Cita-bft loads bft_commit message!");
+        //             let commit: BftCommit = from_slice(&msg).expect("Deserialize message failed!");
+        //             if let Ok(block_with_proof) = self.handle_commit(commit.clone(), true) {
+        //                 info!(
+        //                     "Cita-bft sends block_with_proof to rabbit_mq!\n{:?}",
+        //                     commit
+        //                 );
+        //                 self.function
+        //                     .commit(block_with_proof)
+        //                     .expect("Cita-bft sends block_with_proof failed!");
+        //             };
+        //         }
+        //         _ => {}
+        //     }
+        // }
         info!("Cita-bft successfully processes the whole wal log!");
     }
 }

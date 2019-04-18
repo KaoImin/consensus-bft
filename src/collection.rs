@@ -1,4 +1,4 @@
-use crate::{SignedProposal, SignedVote, VoteType};
+use crate::types::{SignedProposal, SignedVote, VoteType};
 use bft::Vote as BftVote;
 
 use lru_cache::LruCache;
