@@ -8,7 +8,7 @@ license = "MIT"
 [dependencies]
 arraymap = "0.1.1"
 bincode = "1.1"
-bft-rs = { git = "https://github.com/KaoImin/bft-rs.git", rev = "5102f3fcbd50f81bf0b4ea46a7d2864cc0d6711b" }
+bft-core = { git = "https://github.com/KaoImin/bft-core.git", branch = "develop" }
 crossbeam = "0.7"
 log = "0.4.3"
 lru-cache = "0.1"
@@ -23,8 +23,8 @@ env_logger = "0.6"
 rand = "0.5.5"
 
 [features]
-default = ["verify_req"]
-verify_req = ["bft-rs/verify_req"]
+default = ["async_verify"]
+async_verify = ["bft-core/async_verify"]
 
 [[bench]]
 name = "example"

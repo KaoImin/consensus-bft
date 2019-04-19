@@ -1,5 +1,5 @@
 use crate::consensus::INIT_HEIGHT;
-use bft_rs as bft;
+use bft_core::types as bft;
 use rlp::{Encodable, RlpStream};
 use serde::{Serialize, Deserialize};
 use std::collections::HashMap;

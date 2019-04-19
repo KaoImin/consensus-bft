@@ -1,7 +1,8 @@
 use crate::{collection::*, error::ConsensusError, types::*, wal::Wal, ConsensusSupport};
-use bft_rs as bft;
-use bft_rs::{
-    actuator::BftActuator as BFT, BftMsg, Commit as BftCommit, Feed as BftFeed,
+use bft_core::types as bft;
+use bft_core::Core as BFT;
+use bft_core::types::{
+    BftMsg, Commit as BftCommit, Feed as BftFeed,
     Proposal as BftProposal, Status as BftStatus, VerifyResp as BftVerifyResp, Vote as BftVote,
 };
 use crossbeam::crossbeam_channel::{select, unbounded, Receiver, Sender};
