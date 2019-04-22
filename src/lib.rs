@@ -5,25 +5,26 @@
 #![warn(unused_imports)]
 #![warn(dead_code)]
 
-use crate::error::ConsensusError;
-use crate::types::{Address, Commit, ConsensusOutput, Feed};
+use crate::types::{Address, Commit, ConsensusOutput};
+use rlp::{Decodable, Encodable};
 
 ///
-pub trait ConsensusSupport {
+pub trait ConsensusSupport<F: Encodable + Decodable + Clone + Send + 'static> {
+    type Error: ::std::fmt::Debug;
     ///
-    fn get_block(&self, height: u64) -> Result<Feed, ConsensusError>;
+    fn get_block(&self, height: u64) -> Result<Vec<u8>, Self::Error>;
     ///
-    fn transmit(&self, msg: ConsensusOutput) -> Result<(), ConsensusError>;
+    fn transmit(&self, msg: ConsensusOutput<F>) -> Result<(), Self::Error>;
     ///
-    fn check_block(&self, block: &[u8]) -> bool;
+    fn check_block(&self, block: &[u8]) -> Result<Vec<u8>, Self::Error>;
     ///
-    fn commit(&self, commit: Commit) -> Result<(), ConsensusError>;
+    fn commit(&self, commit: Commit<F>) -> Result<(), Self::Error>;
     ///
-    fn signature(&self, hash: &[u8]) -> Option<Vec<u8>>;
+    fn sign(&self, hash: &[u8]) -> Result<Vec<u8>, Self::Error>;
     ///
-    fn check_signature(&self, signature: &[u8], hash: &[u8]) -> Option<Address>;
+    fn check_signature(&self, signature: &[u8], hash: &[u8]) -> Result<Address, Self::Error>;
     ///
-    fn crypt_hash(&self, msg: &[u8]) -> Vec<u8>;
+    fn hash(&self, msg: &[u8]) -> Vec<u8>;
 }
 
 ///
@@ -34,5 +35,7 @@ pub mod consensus;
 pub mod error;
 ///
 pub mod types;
+///
+pub mod util;
 ///
 pub mod wal;

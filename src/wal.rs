@@ -1,4 +1,4 @@
-use log::{warn, trace};
+use log::{trace, warn};
 use std::collections::BTreeMap;
 use std::fs::{read_dir, DirBuilder, File, OpenOptions};
 use std::io::{self, Read, Seek, Write};

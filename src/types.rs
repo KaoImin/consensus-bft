@@ -1,7 +1,7 @@
 use crate::consensus::INIT_HEIGHT;
 use bft_core::types as bft;
-use rlp::{Encodable, RlpStream};
-use serde::{Serialize, Deserialize};
+use rlp::{Decodable, Encodable, RlpStream};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 ///
@@ -11,9 +11,9 @@ pub type Hash = Vec<u8>;
 
 ///
 #[derive(Debug)]
-pub enum ConsensusInput {
+pub enum ConsensusInput<F: Encodable + Decodable + Clone + Send + 'static + Serialize> {
     ///
-    SignedProposal(SignedProposal),
+    SignedProposal(SignedProposal<F>),
     ///
     SignedVote(SignedVote),
     ///
@@ -22,21 +22,17 @@ pub enum ConsensusInput {
     VerifyResp(VerifyResp),
     // ///
     // Feed(Feed),
-    ///
-    Pause,
-    ///
-    Start,
 }
 
 ///
 #[derive(Debug)]
-pub enum ConsensusOutput {
+pub enum ConsensusOutput<F: Encodable + Decodable + Clone + Send + 'static + Serialize> {
     ///
-    SignedProposal(SignedProposal),
+    SignedProposal(SignedProposal<F>),
     ///
     SignedVote(SignedVote),
     ///
-    Commit(Commit),
+    Commit(Commit<F>),
 }
 
 ///
@@ -57,24 +53,23 @@ impl Into<u8> for VoteType {
     }
 }
 
-#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 ///
-pub struct SignedProposal {
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+pub struct SignedProposal<F: Encodable + Decodable + Clone + Send + 'static + Serialize> {
     ///
-    pub proposal: Proposal,
+    pub proposal: Proposal<F>,
     ///
     pub signature: Vec<u8>,
 }
 
-///
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-pub struct Proposal {
+pub struct Proposal<F: Encodable + Decodable + Clone + Send + 'static + Serialize> {
     ///
     pub height: u64,
     ///
     pub round: u64,
     ///
-    pub block: Vec<u8>,
+    pub content: F,
     ///
     pub proof: Proof,
     ///
@@ -85,11 +80,14 @@ pub struct Proposal {
     pub proposer: Address,
 }
 
-impl Encodable for Proposal {
+impl<F> Encodable for Proposal<F>
+where
+    F: Encodable + Decodable + Clone + Send + 'static + Serialize + Encodable,
+{
     fn rlp_append(&self, s: &mut RlpStream) {
         s.append(&self.height)
             .append(&self.round)
-            .append(&self.block);
+            .append(&self.content);
         if let Some(lock_round) = self.lock_round {
             s.append(&lock_round).append_list(&self.lock_votes);
         }
@@ -97,7 +95,10 @@ impl Encodable for Proposal {
     }
 }
 
-impl Proposal {
+impl<F> Proposal<F>
+where
+    F: Encodable + Decodable + Clone + Send + 'static + Serialize + Encodable,
+{
     ///
     pub fn to_bft_proposal(&self, hash: Vec<u8>) -> bft::Proposal {
         let lock_votes = if self.lock_round.is_some() {
@@ -192,11 +193,11 @@ impl Vote {
 
 ///
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-pub struct Commit {
+pub struct Commit<F: Encodable + Decodable + Clone + Send + 'static + Serialize> {
     ///
     pub height: u64,
     ///
-    pub block: Vec<u8>,
+    pub block: F,
     ///
     pub pre_hash: Hash,
     ///

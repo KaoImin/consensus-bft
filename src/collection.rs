@@ -1,7 +1,8 @@
 use crate::types::{SignedProposal, SignedVote, VoteType};
 use bft_core::types::Vote as BftVote;
-
 use lru_cache::LruCache;
+use rlp::{Decodable, Encodable};
+use serde::Serialize;
 use std::collections::HashMap;
 
 pub(crate) const CACHE_NUMBER: usize = 16;
@@ -151,18 +152,21 @@ pub(crate) struct SigVote {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct ProposalCollector {
-    pub(crate) proposals: LruCache<u64, ProposalRoundCollector>,
+pub(crate) struct ProposalCollector<F: Encodable + Decodable + Clone + Send + 'static + Serialize> {
+    pub(crate) proposals: LruCache<u64, ProposalRoundCollector<F>>,
 }
 
-impl ProposalCollector {
+impl<F> ProposalCollector<F>
+where
+    F: Encodable + Decodable + Clone + Send + 'static + Serialize,
+{
     pub(crate) fn new() -> Self {
         ProposalCollector {
             proposals: LruCache::new(CACHE_NUMBER),
         }
     }
 
-    pub(crate) fn add(&mut self, height: u64, round: u64, proposal: &SignedProposal) -> bool {
+    pub(crate) fn add(&mut self, height: u64, round: u64, proposal: &SignedProposal<F>) -> bool {
         if self.proposals.contains_key(&height) {
             self.proposals
                 .get_mut(&height)
@@ -184,18 +188,23 @@ impl ProposalCollector {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct ProposalRoundCollector {
-    pub(crate) round_proposals: LruCache<u64, SignedProposal>,
+pub(crate) struct ProposalRoundCollector<
+    F: Encodable + Decodable + Clone + Send + 'static + Serialize,
+> {
+    pub(crate) round_proposals: LruCache<u64, SignedProposal<F>>,
 }
 
-impl ProposalRoundCollector {
+impl<F> ProposalRoundCollector<F>
+where
+    F: Encodable + Decodable + Clone + Send + 'static + Serialize,
+{
     pub(crate) fn new() -> Self {
         ProposalRoundCollector {
             round_proposals: LruCache::new(CACHE_NUMBER),
         }
     }
 
-    pub(crate) fn add(&mut self, round: u64, proposal: &SignedProposal) -> bool {
+    pub(crate) fn add(&mut self, round: u64, proposal: &SignedProposal<F>) -> bool {
         if self.round_proposals.contains_key(&round) {
             false
         } else {
