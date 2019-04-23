@@ -107,9 +107,9 @@ where
             for vote in self.lock_votes.iter() {
                 res.push(vote.vote.to_bft_vote());
             }
-            Some(res)
+            res
         } else {
-            None
+            Vec::new()
         };
 
         bft::Proposal {

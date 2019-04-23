@@ -312,7 +312,7 @@ where
                 .votes
                 .get_vote_set(height, res, VoteType::Prevote)
                 .expect("Build SignedVote Error!");
-            for vote in proposal.lock_votes.unwrap().into_iter() {
+            for vote in proposal.lock_votes.into_iter() {
                 let v = vote_set
                     .vote_pair
                     .get(&vote)
