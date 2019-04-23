@@ -10,7 +10,7 @@ pub type Address = Vec<u8>;
 pub type Hash = Vec<u8>;
 
 ///
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ConsensusInput<F: Encodable + Decodable + Clone + Send + 'static + Serialize> {
     ///
     SignedProposal(SignedProposal<F>),
@@ -20,12 +20,12 @@ pub enum ConsensusInput<F: Encodable + Decodable + Clone + Send + 'static + Seri
     Status(Status),
     ///
     VerifyResp(VerifyResp),
-    // ///
-    // Feed(Feed),
+    ///
+    Feed(Feed<F>),
 }
 
 ///
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum ConsensusOutput<F: Encodable + Decodable + Clone + Send + 'static + Serialize> {
     ///
     SignedProposal(SignedProposal<F>),
@@ -148,7 +148,7 @@ pub struct Vote {
     ///
     pub round: u64,
     ///
-    pub block_hash: Hash,
+    pub proposal: Hash,
     ///
     pub voter: Address,
 }
@@ -159,7 +159,7 @@ impl Encodable for Vote {
         s.append(&res)
             .append(&self.height)
             .append(&self.round)
-            .append(&self.block_hash)
+            .append(&self.proposal)
             .append(&self.voter);
     }
 }
@@ -176,7 +176,7 @@ impl Vote {
             vote_type,
             height: self.height,
             round: self.round,
-            proposal: self.block_hash.clone(),
+            proposal: self.proposal.clone(),
             voter: self.voter.clone(),
         }
     }
@@ -186,7 +186,7 @@ impl Vote {
             vote_type: vtype,
             height: vote.height,
             round: vote.round,
-            block_hash: vote.proposal,
+            proposal: vote.proposal,
             voter: vote.voter,
         }
     }
@@ -198,9 +198,9 @@ pub struct Commit<F: Encodable + Decodable + Clone + Send + 'static + Serialize>
     ///
     pub height: u64,
     ///
-    pub block: F,
+    pub result: F,
     ///
-    pub pre_hash: Hash,
+    pub prev_hash: Hash,
     ///
     pub proof: Proof,
     ///
@@ -237,20 +237,11 @@ impl Status {
 
 ///
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-pub struct Feed {
+pub struct Feed<F: Encodable + Decodable + Clone + Send + 'static + Serialize> {
     /// The height of the proposal.
     pub height: u64,
     /// A proposal.
-    pub block: Vec<u8>,
-}
-
-impl Feed {
-    pub(crate) fn to_bft_feed(&self, proposal: Vec<u8>) -> bft::Feed {
-        bft::Feed {
-            height: self.height,
-            proposal,
-        }
-    }
+    pub content: F,
 }
 
 ///
@@ -259,14 +250,14 @@ pub struct VerifyResp {
     ///
     pub is_pass: bool,
     ///
-    pub block_hash: Hash,
+    pub proposal: Hash,
 }
 
 impl VerifyResp {
     pub(crate) fn to_bft_resp(&self) -> bft::VerifyResp {
         bft::VerifyResp {
             is_pass: self.is_pass,
-            proposal: self.block_hash.clone(),
+            proposal: self.proposal.clone(),
         }
     }
 }

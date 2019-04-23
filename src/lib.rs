@@ -14,11 +14,11 @@ pub trait ConsensusSupport<F: Encodable + Decodable + Clone + Send + 'static + S
     ///
     type Error: ::std::fmt::Debug;
     ///
-    fn get_block(&self, height: u64) -> Result<Vec<u8>, Self::Error>;
+    fn get_block(&self, height: u64) -> Result<F, Self::Error>;
     ///
     fn transmit(&self, msg: ConsensusOutput<F>) -> Result<(), Self::Error>;
     ///
-    fn check_block(&self, block: &[u8]) -> Result<Vec<u8>, Self::Error>;
+    fn check_block(&self, block: F, height: u64) -> Result<(), Self::Error>;
     ///
     fn commit(&self, commit: Commit<F>) -> Result<(), Self::Error>;
     ///
