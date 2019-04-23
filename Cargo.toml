@@ -6,16 +6,15 @@ edition = "2018"
 license = "MIT"
 
 [dependencies]
-arraymap = "0.1.1"
 bincode = "1.1"
 bft-core = { git = "https://github.com/KaoImin/bft-core.git", branch = "develop" }
-crossbeam = "0.7"
+crossbeam-channel = "0.3"
+crossbeam-utils = "0.6"
 log = "0.4.3"
 lru-cache = "0.1"
 rlp = "0.3.0"
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-serde_derive = "1.0"
 
 [dev-dependencies]
 criterion = "0.2"

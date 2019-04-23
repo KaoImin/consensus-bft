@@ -1,5 +1,3 @@
-use crate::ConsensusSupport;
-
 ///
 #[derive(Debug, Clone)]
 pub enum ConsensusError {
