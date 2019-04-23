@@ -6,11 +6,11 @@
 #![warn(dead_code)]
 
 use crate::types::{Address, Commit, ConsensusOutput};
-use rlp::{Decodable, Encodable};
-use serde::Serialize;
+use rlp::{Encodable, Decodable};
+use serde::{Serialize, Deserialize};
 
 ///
-pub trait ConsensusSupport<F: Encodable + Decodable + Clone + Send + 'static + Serialize> {
+pub trait ConsensusSupport<F: Encodable + Decodable + Clone + Send + 'static + Serialize + Deserialize<'static>> {
     ///
     type Error: ::std::fmt::Debug;
     ///

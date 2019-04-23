@@ -11,7 +11,9 @@ pub type Hash = Vec<u8>;
 
 ///
 #[derive(Debug, Clone)]
-pub enum ConsensusInput<F: Encodable + Decodable + Clone + Send + 'static + Serialize> {
+pub enum ConsensusInput<
+    F: Encodable + Decodable + Clone + Send + 'static + Serialize + Deserialize<'static>,
+> {
     ///
     SignedProposal(SignedProposal<F>),
     ///
@@ -26,7 +28,9 @@ pub enum ConsensusInput<F: Encodable + Decodable + Clone + Send + 'static + Seri
 
 ///
 #[derive(Debug, Clone)]
-pub enum ConsensusOutput<F: Encodable + Decodable + Clone + Send + 'static + Serialize> {
+pub enum ConsensusOutput<
+    F: Encodable + Decodable + Clone + Send + 'static + Serialize + Deserialize<'static>,
+> {
     ///
     SignedProposal(SignedProposal<F>),
     ///
@@ -55,7 +59,9 @@ impl Into<u8> for VoteType {
 
 ///
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-pub struct SignedProposal<F: Encodable + Decodable + Clone + Send + 'static + Serialize> {
+pub struct SignedProposal<
+    F: Encodable + Decodable + Clone + Send + 'static + Serialize + Deserialize<'static>,
+> {
     ///
     pub proposal: Proposal<F>,
     ///
@@ -64,7 +70,9 @@ pub struct SignedProposal<F: Encodable + Decodable + Clone + Send + 'static + Se
 
 ///
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-pub struct Proposal<F: Encodable + Decodable + Clone + Send + 'static + Serialize> {
+pub struct Proposal<
+    F: Encodable + Decodable + Clone + Send + 'static + Serialize + Deserialize<'static>,
+> {
     ///
     pub height: u64,
     ///
@@ -83,7 +91,14 @@ pub struct Proposal<F: Encodable + Decodable + Clone + Send + 'static + Serializ
 
 impl<F> Encodable for Proposal<F>
 where
-    F: Encodable + Decodable + Clone + Send + 'static + Serialize + Encodable,
+    F: Encodable
+        + Decodable
+        + Clone
+        + Send
+        + 'static
+        + Serialize
+        + Deserialize<'static>
+        + Encodable,
 {
     fn rlp_append(&self, s: &mut RlpStream) {
         s.append(&self.height)
@@ -98,7 +113,14 @@ where
 
 impl<F> Proposal<F>
 where
-    F: Encodable + Decodable + Clone + Send + 'static + Serialize + Encodable,
+    F: Encodable
+        + Decodable
+        + Clone
+        + Send
+        + 'static
+        + Serialize
+        + Deserialize<'static>
+        + Encodable,
 {
     ///
     pub fn to_bft_proposal(&self, hash: Vec<u8>) -> bft::Proposal {
@@ -194,7 +216,16 @@ impl Vote {
 
 ///
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-pub struct Commit<F: Encodable + Decodable + Clone + Send + 'static + Serialize> {
+pub struct Commit<
+    F: Encodable
+        + Decodable
+        + Clone
+        + Send
+        + 'static
+        + Serialize
+        + Deserialize<'static>
+        + Deserialize<'static>,
+> {
     ///
     pub height: u64,
     ///
@@ -237,7 +268,9 @@ impl Status {
 
 ///
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-pub struct Feed<F: Encodable + Decodable + Clone + Send + 'static + Serialize> {
+pub struct Feed<
+    F: Encodable + Decodable + Clone + Send + 'static + Serialize + Deserialize<'static>,
+> {
     /// The height of the proposal.
     pub height: u64,
     /// A proposal.
