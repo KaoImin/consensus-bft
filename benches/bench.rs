@@ -26,7 +26,7 @@ fn gen_mb() -> Vec<u8> {
     mb
 }
 
-fn bench_bincode(block: Vec<u8>) {
+fn bench_bincode(content: Vec<u8>) {
     let proof = Proof {
         block_hash: bench_proof(),
         height: 0,
@@ -37,7 +37,7 @@ fn bench_bincode(block: Vec<u8>) {
     let proposal = Proposal {
         height: 0,
         round: 0,
-        block,
+        content,
         proof,
         lock_round: None,
         lock_votes: Vec::new(),
@@ -46,7 +46,7 @@ fn bench_bincode(block: Vec<u8>) {
     serialize(&proposal).unwrap();
 }
 
-fn bench_rlp(block: Vec<u8>) {
+fn bench_rlp(content: Vec<u8>) {
     let proof = Proof {
         block_hash: bench_proof(),
         height: 0,
@@ -57,7 +57,7 @@ fn bench_rlp(block: Vec<u8>) {
     let proposal = Proposal {
         height: 0,
         round: 0,
-        block,
+        content,
         proof,
         lock_round: None,
         lock_votes: Vec::new(),
@@ -67,7 +67,7 @@ fn bench_rlp(block: Vec<u8>) {
     proposal.rlp_bytes();
 }
 
-fn bench_to_proposal(block: Vec<u8>) {
+fn bench_to_proposal(content: Vec<u8>) {
     let (s, r) = unbounded();
     let proof = Proof {
         block_hash: bench_proof(),
@@ -79,7 +79,7 @@ fn bench_to_proposal(block: Vec<u8>) {
     let proposal = Proposal {
         height: 0,
         round: 0,
-        block,
+        content,
         proof,
         lock_round: None,
         lock_votes: Vec::new(),
@@ -90,14 +90,14 @@ fn bench_to_proposal(block: Vec<u8>) {
     r.recv().unwrap();
 }
 
-fn bench_proposal(block: Vec<u8>) {
+fn bench_proposal(content: Vec<u8>) {
     let (s, r) = unbounded();
     let res = SignedProposal {
         signature: vec![1, 1, 1],
         proposal: Proposal {
             height: 0,
             round: 0,
-            block,
+            content,
             proof: Proof {
                 block_hash: bench_proof(),
                 height: 0,

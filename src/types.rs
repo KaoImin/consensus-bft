@@ -62,6 +62,7 @@ pub struct SignedProposal<F: Encodable + Decodable + Clone + Send + 'static + Se
     pub signature: Vec<u8>,
 }
 
+///
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct Proposal<F: Encodable + Decodable + Clone + Send + 'static + Serialize> {
     ///

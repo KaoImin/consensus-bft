@@ -7,9 +7,11 @@
 
 use crate::types::{Address, Commit, ConsensusOutput};
 use rlp::{Decodable, Encodable};
+use serde::Serialize;
 
 ///
-pub trait ConsensusSupport<F: Encodable + Decodable + Clone + Send + 'static> {
+pub trait ConsensusSupport<F: Encodable + Decodable + Clone + Send + 'static + Serialize> {
+    ///
     type Error: ::std::fmt::Debug;
     ///
     fn get_block(&self, height: u64) -> Result<Vec<u8>, Self::Error>;

@@ -1,19 +1,20 @@
 use crate::{collection::*, error::ConsensusError, types::*, wal::Wal, ConsensusSupport};
 use bft_core::types as bft;
-use bft_core::Core as BFT;
 use bft_core::types::{
-    BftMsg, Commit as BftCommit, Feed as BftFeed,
-    Proposal as BftProposal, Status as BftStatus, VerifyResp as BftVerifyResp, Vote as BftVote,
+    BftMsg, Commit as BftCommit, Feed as BftFeed, Proposal as BftProposal, Status as BftStatus,
+    VerifyResp as BftVerifyResp, Vote as BftVote,
 };
+use bft_core::Core as BFT;
 use crossbeam::crossbeam_channel::{select, unbounded, Receiver, Sender};
-use log::{error, warn, info};
-use rlp::Encodable;
+use log::{error, info, warn};
+use rlp::{Decodable, Encodable};
+use serde::Serialize;
 use serde_json::to_string;
 use std::collections::HashMap;
 use std::thread;
 
 ///
-pub type ConsensusResult<T> = Result<T, ConsensusError>;
+pub type Result<T> = ::std::result::Result<T, ConsensusError>;
 
 pub(crate) const INIT_HEIGHT: u64 = 0;
 const LOG_TYPE_SIGNED_PROPOSAL: u8 = 1;
@@ -27,11 +28,16 @@ const LOG_TYPE_COMMIT: u8 = 8;
 
 ///
 #[derive(Clone, Debug)]
-pub struct ConsensusExecutor(Sender<ConsensusInput>);
+pub struct ConsensusExecutor<F: Encodable + Decodable + Clone + Send + 'static + Serialize>(
+    Sender<ConsensusInput<F>>,
+);
 
-impl ConsensusExecutor {
+impl<F> ConsensusExecutor<F>
+where
+    F: Encodable + Decodable + Clone + Send + 'static + Serialize,
+{
     ///
-    pub fn new<T: ConsensusSupport + Send + 'static>(
+    pub fn new<T: ConsensusSupport<F> + Send + 'static>(
         support: T,
         address: Address,
         wal_path: &str,
@@ -42,49 +48,58 @@ impl ConsensusExecutor {
     }
 
     ///
-    pub fn send(&self, input: ConsensusInput) -> Result<(), ConsensusError> {
-        self.0
-            .send(input)
-            .map_err(|_| ConsensusError::BlockVerifyDiff)
+    pub fn send(&self, input: ConsensusInput<F>) -> Result<()> {
+        self.0.send(input).map_err(|_| ConsensusError::SendMsgErr)
     }
 }
 
 ///
-pub struct Consensus<T: ConsensusSupport + Send + 'static> {
+pub struct Consensus<
+    T: ConsensusSupport<F> + Send + 'static,
+    F: Encodable + Decodable + Clone + Send + 'static + Serialize,
+> {
     bft_recv: Receiver<BftMsg>,
-    out_recv: Receiver<ConsensusInput>,
+    interface_recv: Receiver<ConsensusInput<F>>,
 
     height: u64,
     bft: BFT,
     block: Option<Vec<u8>>,
+    complete_block: Option<Vec<u8>>,
     verified_block: HashMap<Hash, bool>,
     authority: AuthorityManage,
     votes: VoteCollector,
-    proposals: ProposalCollector,
+    proposals: ProposalCollector<F>,
     proof: Option<Proof>,
     pre_hash: Option<Hash>,
     wal_log: Wal,
-    block_cache: HashMap<Hash, Vec<u8>>,
-    proposal_cache: HashMap<u64, Vec<SignedProposal>>,
+    block_cache: HashMap<Hash, F>,
+    proposal_cache: HashMap<u64, Vec<SignedProposal<F>>>,
     vote_cache: HashMap<u64, Vec<SignedVote>>,
 
     function: T,
 }
 
-impl<T> Consensus<T>
+impl<T, F> Consensus<T, F>
 where
-    T: ConsensusSupport + Send + 'static,
+    T: ConsensusSupport<F> + Send + 'static,
+    F: Encodable + Decodable + Clone + Send + 'static + Serialize,
 {
     ///
-    fn new(support: T, address: Address, recv: Receiver<ConsensusInput>, wal_path: String) -> Self {
+    fn new(
+        support: T,
+        address: Address,
+        recv: Receiver<ConsensusInput<F>>,
+        wal_path: String,
+    ) -> Self {
         let (a, r) = BFT::start(address);
         Consensus {
             bft_recv: r,
-            out_recv: recv,
+            interface_recv: recv,
 
             height: INIT_HEIGHT,
             bft: a,
             block: None,
+            complete_block: None,
             verified_block: HashMap::new(),
             authority: AuthorityManage::default(),
             votes: VoteCollector::new(),
@@ -101,7 +116,12 @@ where
     }
 
     ///
-    pub fn start(support: T, address: Address, recv: Receiver<ConsensusInput>, wal_path: String) {
+    pub fn start(
+        support: T,
+        address: Address,
+        recv: Receiver<ConsensusInput<F>>,
+        wal_path: String,
+    ) {
         // self.load_wal_log();
         thread::spawn(move || {
             let mut engine = Consensus::new(support, address, recv, wal_path);
@@ -111,15 +131,15 @@ where
                     recv(engine.bft_recv) -> bft_msg => if let Ok(bft_msg) = bft_msg {
                         let _ = engine.inner_process(bft_msg);
                     },
-                    recv(engine.out_recv) -> out_msg => if let Ok(out_msg) = out_msg {
-                        let _ = engine.outer_process(out_msg);
+                    recv(engine.interface_recv) -> external_msg => if let Ok(external_msg) = external_msg {
+                        let _ = engine.external_process(external_msg);
                     },
                 }
             }
         });
     }
 
-    fn outer_process(&mut self, msg: ConsensusInput) -> Result<(), ConsensusError> {
+    fn external_process(&mut self, msg: ConsensusInput<F>) -> Result<()> {
         match msg {
             ConsensusInput::SignedProposal(sp) => {
                 info!("receive signed proposal");
@@ -147,14 +167,14 @@ where
                 let status = self.handle_rich_status(rs, true)?;
                 self.bft.send_status(BftMsg::Status(status)).unwrap();
                 let height = self.height;
-                let feed = self.function.get_block(height)?;
-                let feed = self.handle_block_txs(feed, true)?;
-                let _ = self.bft.send_feed(BftMsg::Feed(feed));
+                // let feed = self.function.get_block(height)?;
+                // let feed = self.handle_block_txs(feed, true)?;
+                // let _ = self.bft.send_feed(BftMsg::Feed(feed));
                 self.send_cache_proposal(height)?;
                 self.send_cache_vote(height)?;
                 Ok(())
             }
-            // ConsensusInput::VerifyResp(r) => {
+            // ConsensusInput<F>::VerifyResp(r) => {
             //     let verify_resp = self.handle_verify_block_resp(r, true)?;
             //     info!(
             //         "Cita-bft hands over verify_resp to bft-rs!\n{:?}",
@@ -171,53 +191,46 @@ where
             //     Ok(())
             // }
 
-            // ConsensusInput::Feed(f) => {
+            // ConsensusInput<F>::Feed(f) => {
             //     let feed = self.handle_block_txs(f, true)?;
             //     self.bft.send_feed(BftMsg::Feed(feed)).expect("");
             //     Ok(())
             // }
-            ConsensusInput::Start => {
-                self.bft
-                    .send_start(BftMsg::Start)
-                    .expect("send command fail");
-                Ok(())
-            }
-            ConsensusInput::Pause => {
-                self.bft
-                    .send_start(BftMsg::Pause)
-                    .expect("send command fail");
-                Ok(())
-            }
             _ => panic!("invialid type"),
         }
     }
 
-    fn inner_process(&mut self, msg: BftMsg) -> Result<(), ConsensusError> {
+    fn inner_process(&mut self, msg: BftMsg) -> Result<()> {
         match msg {
             BftMsg::Proposal(p) => {
                 info!("receive proposal");
                 let sp = self.handle_proposal(p, true)?;
                 self.function
-                    .transmit(ConsensusOutput::SignedProposal(sp))?;
+                    .transmit(ConsensusOutput::SignedProposal(sp))
+                    .map_err(|_| ConsensusError::SupportErr);
                 Ok(())
             }
             BftMsg::Vote(v) => {
                 info!("receive vote");
                 let sv = self.handle_vote(v, true)?;
-                self.function.transmit(ConsensusOutput::SignedVote(sv))?;
+                self.function
+                    .transmit(ConsensusOutput::SignedVote(sv))
+                    .map_err(|_| ConsensusError::SupportErr);
                 Ok(())
             }
             BftMsg::Commit(c) => {
                 info!("receive commit");
                 let commit = self.handle_commit(c, true)?;
-                self.function.commit(commit)?;
+                self.function
+                    .commit(commit)
+                    .map_err(|_| ConsensusError::SupportErr);
                 Ok(())
             }
             _ => panic!("BFT Core Error!"),
         }
     }
 
-    fn send_cache_proposal(&mut self, height: u64) -> ConsensusResult<()> {
+    fn send_cache_proposal(&mut self, height: u64) -> Result<()> {
         let proposals = self.proposal_cache.get(&height);
         if proposals.is_none() {
             return Ok(());
@@ -240,7 +253,7 @@ where
         Ok(())
     }
 
-    fn send_cache_vote(&mut self, height: u64) -> ConsensusResult<()> {
+    fn send_cache_vote(&mut self, height: u64) -> Result<()> {
         let votes = self.vote_cache.get(&height);
         if votes.is_none() {
             return Ok(());
@@ -259,23 +272,23 @@ where
         &mut self,
         proposal: BftProposal,
         need_wal: bool,
-    ) -> ConsensusResult<SignedProposal> {
+    ) -> Result<SignedProposal<F>> {
         let height = proposal.height;
         let round = proposal.round;
         if height < self.height {
-            warn!(
+            error!(
                 "The height of bft_proposal is {} which is obsolete compared to self.height {}!",
                 height, self.height
             );
-            return Err(ConsensusError::BlockVerifyDiff);
+            return Err(ConsensusError::BftCoreErr);
         }
         if need_wal {
             if let Ok(msg) = to_string(&proposal) {
                 if self.wal_log.save(height, LOG_TYPE_PROPOSAL, msg).is_err() {
-                    return Err(ConsensusError::BlockVerifyDiff);
+                    return Err(ConsensusError::SaveWalErr);
                 }
             } else {
-                return Err(ConsensusError::BlockVerifyDiff);
+                return Err(ConsensusError::SerJsonErr);
             }
         }
         let signed_proposal = self.build_signed_proposal(proposal)?;
@@ -283,7 +296,8 @@ where
         Ok(signed_proposal)
     }
 
-    fn build_signed_proposal(&mut self, proposal: BftProposal) -> ConsensusResult<SignedProposal> {
+    fn build_signed_proposal(&mut self, proposal: BftProposal) -> Result<SignedProposal<F>> {
+        // TODO
         if self.proof.is_none() {
             return Err(ConsensusError::BlockVerifyDiff);
         }
@@ -310,21 +324,21 @@ where
             Vec::new()
         };
 
-        let block = self.block_cache.get(&hash).unwrap().to_owned();
+        let content = self.block_cache.get(&hash).unwrap().to_owned();
         let signed_proposal = Proposal {
             height,
             round,
-            block,
+            content,
             proof: self.proof.clone().unwrap(),
             lock_round,
             lock_votes,
             proposer: proposal.proposer,
         };
         // sig
-        let hash = self.function.crypt_hash(&signed_proposal.rlp_bytes());
-        let sig = self.function.signature(&hash);
-        if sig.is_none() {
-            return Err(ConsensusError::BlockVerifyDiff);
+        let hash = self.function.hash(&signed_proposal.rlp_bytes());
+        let sig = self.function.sign(&hash);
+        if sig.is_err() {
+            return Err(ConsensusError::SupportErr);
         }
 
         Ok(SignedProposal {
@@ -333,22 +347,22 @@ where
         })
     }
 
-    fn handle_vote(&mut self, vote: BftVote, need_wal: bool) -> ConsensusResult<SignedVote> {
+    fn handle_vote(&mut self, vote: BftVote, need_wal: bool) -> Result<SignedVote> {
         let height = vote.height;
         if height < self.height {
             warn!(
                 "The height of bft_vote is {} which is obsolete compared to self.height {}!",
                 height, self.height
             );
-            return Err(ConsensusError::BlockVerifyDiff);
+            return Err(ConsensusError::BftCoreErr);
         }
         if need_wal {
             if let Ok(msg) = to_string(&vote) {
                 if self.wal_log.save(height, LOG_TYPE_VOTE, msg).is_err() {
-                    return Err(ConsensusError::BlockVerifyDiff);
+                    return Err(ConsensusError::SaveWalErr);
                 }
             } else {
-                return Err(ConsensusError::BlockVerifyDiff);
+                return Err(ConsensusError::SerJsonErr);
             }
         }
         let vtype = if vote.vote_type == bft::VoteType::Prevote {
@@ -358,8 +372,8 @@ where
         };
 
         let signed_vote = Vote::from_bft_vote(vote.clone(), vtype.clone());
-        let hash = self.function.crypt_hash(&signed_vote.rlp_bytes());
-        if let Some(sig) = self.function.signature(&hash) {
+        let hash = self.function.hash(&signed_vote.rlp_bytes());
+        if let Ok(sig) = self.function.sign(&hash) {
             let res = SignedVote {
                 vote: signed_vote,
                 signature: sig,
@@ -367,26 +381,26 @@ where
             self.votes.add(height, vote.round, vtype, &vote, &res);
             Ok(res)
         } else {
-            return Err(ConsensusError::BlockVerifyDiff);
+            return Err(ConsensusError::SupportErr);
         }
     }
 
-    fn handle_commit(&mut self, commit: bft::Commit, need_wal: bool) -> ConsensusResult<Commit> {
+    fn handle_commit(&mut self, commit: bft::Commit, need_wal: bool) -> Result<Commit<F>> {
         let height = commit.height;
         if height < self.height {
             warn!(
                 "The height of bft_commit is {} which is obsolete compared to self.height {}!",
                 height, self.height
             );
-            return Err(ConsensusError::BlockVerifyDiff);
+            return Err(ConsensusError::BftCoreErr);
         }
         if need_wal {
             if let Ok(msg) = to_string(&commit) {
                 if self.wal_log.save(height, LOG_TYPE_COMMIT, msg).is_err() {
-                    return Err(ConsensusError::BlockVerifyDiff);
+                    return Err(ConsensusError::SaveWalErr);
                 }
             } else {
-                return Err(ConsensusError::BlockVerifyDiff);
+                return Err(ConsensusError::SerJsonErr);
             }
         }
 
@@ -395,46 +409,45 @@ where
         let vote = commit.clone().lock_votes;
         let proposal = commit.clone().proposal;
         let proof = self.generate_proof(height, round, block_hash, vote)?;
-        let block = self
-            .block_cache
-            .get(&proposal)
-            .expect("Obsolete Origin Block!")
-            .to_owned();
+        if let Some(content) = self.block_cache.get(&proposal) {
+            let res = Commit {
+                height,
+                //  TODO expect
+                pre_hash: self.pre_hash.clone().expect("Lose PrevHash!"),
+                block: content.to_owned(),
+                address: commit.address,
+                proof,
+            };
 
-        let res = Commit {
-            height,
-            pre_hash: self.pre_hash.clone().expect("Obsolete PrevHash!"),
-            block,
-            address: commit.address,
-            proof,
-        };
-
-        Ok(res)
+            Ok(res)
+        } else {
+            Err(ConsensusError::LoseBlock)
+        }
     }
 
-    fn handle_block_txs(&mut self, msg: Feed, need_wal: bool) -> ConsensusResult<BftFeed> {
-        let height = msg.height;
-        let block = msg.block.clone();
-        let feed = msg.clone();
-        if height != self.height {
-            return Err(ConsensusError::BlockVerifyDiff);
-        }
-        if need_wal {
-            if let Ok(msg) = to_string(&feed) {
-                if self.wal_log.save(height, LOG_TYPE_BLOCK_TXS, msg).is_err() {
-                    return Err(ConsensusError::BlockVerifyDiff);
-                }
-            } else {
-                return Err(ConsensusError::BlockVerifyDiff);
-            }
-        }
+    // fn handle_block_txs(&mut self, msg: Feed, need_wal: bool) -> Result<BftFeed> {
+    //     let height = msg.height;
+    //     let block = msg.block.clone();
+    //     let feed = msg.clone();
+    //     if height != self.height {
+    //         return Err(ConsensusError::BlockVerifyDiff);
+    //     }
+    //     if need_wal {
+    //         if let Ok(msg) = to_string(&feed) {
+    //             if self.wal_log.save(height, LOG_TYPE_BLOCK_TXS, msg).is_err() {
+    //                 return Err(ConsensusError::BlockVerifyDiff);
+    //             }
+    //         } else {
+    //             return Err(ConsensusError::BlockVerifyDiff);
+    //         }
+    //     }
 
-        let hash = self.function.crypt_hash(&block);
-        self.block_cache
-            .entry(hash.clone())
-            .or_insert_with(|| block);
-        Ok(msg.to_bft_feed(hash))
-    }
+    //     let hash = self.function.hash(&block);
+    //     self.block_cache
+    //         .entry(hash.clone())
+    //         .or_insert_with(|| block);
+    //     Ok(msg.to_bft_feed(hash))
+    // }
 
     fn generate_proof(
         &mut self,
@@ -442,18 +455,18 @@ where
         round: u64,
         block_hash: Hash,
         vote: Vec<bft::Vote>,
-    ) -> ConsensusResult<Proof> {
+    ) -> Result<Proof> {
         let mut tmp = HashMap::new();
         if let Some(vote_set) = self.votes.get_vote_set(height, round, VoteType::Precommit) {
             for v in vote.iter() {
                 if let Some(signed_vote) = vote_set.vote_pair.get(&v) {
                     tmp.insert(v.clone().voter, signed_vote.signature.clone());
                 } else {
-                    return Err(ConsensusError::BlockVerifyDiff);
+                    return Err(ConsensusError::LoseSignedVote);
                 }
             }
         } else {
-            return Err(ConsensusError::BlockVerifyDiff);
+            return Err(ConsensusError::NoVoteset);
         }
         let res = Proof {
             height,
@@ -466,44 +479,46 @@ where
 
     fn handle_signed_proposal(
         &mut self,
-        msg: SignedProposal,
+        msg: SignedProposal<F>,
         need_wal: bool,
-    ) -> ConsensusResult<(BftProposal, Option<VerifyResp>)> {
-        //
+    ) -> Result<(BftProposal, Option<VerifyResp>)> {
+        // check signature
         let sig = msg.signature.clone();
         let proposal = msg.proposal.clone();
 
-        let hash = self.function.crypt_hash(&proposal.rlp_bytes());
+        let hash = self.function.hash(&proposal.rlp_bytes());
         let address = self.function.check_signature(&sig, &hash);
-        if address.is_none() {
-            return Err(ConsensusError::BlockVerifyDiff);
+        if address.is_err() {
+            return Err(ConsensusError::SupportErr);
         }
 
         let height = proposal.height;
         let round = proposal.round;
 
-        if proposal.proposer != address.clone().unwrap() {
-            return Err(ConsensusError::BlockVerifyDiff);
+        if proposal.proposer != address.unwrap() {
+            return Err(ConsensusError::SignatureErr);
         }
 
+        // check height
         if height < self.height - 1 {
             warn!(
                 "The height of signed_proposal is {} which is obsolete compared to self.height {}!",
                 height, self.height
             );
-            return Err(ConsensusError::BlockVerifyDiff);
+            return Err(ConsensusError::ObsoleteMsg);
         }
-        let block = proposal.block.clone();
-        let hash = self.function.crypt_hash(&block);
+        let content = proposal.content.clone();
+        let hash = self.function.hash(&content.rlp_bytes());
         self.block_cache
             .entry(hash.clone())
-            .or_insert(block.clone());
+            .or_insert(content.clone());
 
+        //  TODO async verify
         let verify_resp: bool;
         if let Some(res) = self.verified_block.get(&hash) {
             verify_resp = *res;
         } else {
-            verify_resp = self.function.check_block(&hash);
+            verify_resp = true;
         }
 
         if height >= self.height {
@@ -514,30 +529,30 @@ where
                         .save(height, LOG_TYPE_SIGNED_PROPOSAL, res)
                         .is_err()
                     {
-                        return Err(ConsensusError::BlockVerifyDiff);
+                        return Err(ConsensusError::SaveWalErr);
                     }
                 } else {
-                    return Err(ConsensusError::BlockVerifyDiff);
+                    return Err(ConsensusError::SerJsonErr);
                 }
             }
             if height > self.height {
                 self.proposal_cache
                     .entry(height)
-                    .or_insert_with(|| vec![])
+                    .or_insert_with(Vec::new)
                     .push(msg);
                 warn!(
                     "The height of signed_proposal is {} which is higher than self.height {}!",
                     height, self.height
                 );
-                return Err(ConsensusError::BlockVerifyDiff);
+                return Err(ConsensusError::FutureMsg);
             }
         }
         self.proposals.add(height, round, &msg);
 
         let bft_proposal = proposal.to_bft_proposal(hash);
 
-        self.check_proposer(height, round, &address.unwrap())?;
-        self.check_lock_votes(&msg, block)?;
+        self.check_proposer(height, round, &bft_proposal.proposer)?;
+        self.check_lock_votes(&msg, content.rlp_bytes())?;
 
         let verify_resp = VerifyResp {
             is_pass: verify_resp,
@@ -552,14 +567,14 @@ where
         Ok((bft_proposal, Some(verify_resp)))
     }
 
-    fn handle_signed_vote(&mut self, msg: SignedVote, need_wal: bool) -> ConsensusResult<BftVote> {
+    fn handle_signed_vote(&mut self, msg: SignedVote, need_wal: bool) -> Result<BftVote> {
         let sig = msg.signature.clone();
         let vote = msg.vote.clone();
 
-        let hash = self.function.crypt_hash(&msg.rlp_bytes());
+        let hash = self.function.hash(&msg.rlp_bytes());
         let address = self.function.check_signature(&sig, &hash);
-        if address.is_none() {
-            return Err(ConsensusError::BlockVerifyDiff);
+        if address.is_err() {
+            return Err(ConsensusError::SupportErr);
         }
 
         let height = vote.height;
@@ -570,12 +585,12 @@ where
                 "The height of raw_bytes is {} which is obsolete compared to self.height {}!",
                 height, self.height
             );
-            return Err(ConsensusError::BlockVerifyDiff);
+            return Err(ConsensusError::ObsoleteMsg);
         }
         let address = address.unwrap();
         if sender != address {
             error!("The address recovers from the signature is {:?} which is mismatching with the sender {:?}!", &address, &sender);
-            return Err(ConsensusError::BlockVerifyDiff);
+            return Err(ConsensusError::SignatureErr);
         }
 
         let bft_vote = vote.to_bft_vote();
@@ -584,10 +599,10 @@ where
             if height - self.height < CACHE_NUMBER as u64 && need_wal {
                 if let Ok(res) = to_string(&msg) {
                     if self.wal_log.save(height, LOG_TYPE_RAW_BYTES, res).is_err() {
-                        return Err(ConsensusError::BlockVerifyDiff);
+                        return Err(ConsensusError::SaveWalErr);
                     }
                 } else {
-                    return Err(ConsensusError::BlockVerifyDiff);
+                    return Err(ConsensusError::SerJsonErr);
                 }
             }
             if height > self.height {
@@ -599,7 +614,7 @@ where
                     "The height of raw_bytes is {} which is higher than self.height {}!",
                     height, self.height
                 );
-                return Err(ConsensusError::BlockVerifyDiff);
+                return Err(ConsensusError::FutureMsg);
             }
         }
         self.votes
@@ -608,7 +623,7 @@ where
         Ok(bft_vote)
     }
 
-    fn handle_rich_status(&mut self, msg: Status, need_wal: bool) -> ConsensusResult<BftStatus> {
+    fn handle_rich_status(&mut self, msg: Status, need_wal: bool) -> Result<BftStatus> {
         let rich_status = msg;
         let height = rich_status.height;
         if height < self.height {
@@ -616,7 +631,7 @@ where
                 "The height of rich_status is {} which is obsolete compared to self.height {}!",
                 height, self.height
             );
-            return Err(ConsensusError::BlockVerifyDiff);
+            return Err(ConsensusError::ObsoleteMsg);
         }
         if need_wal {
             if let Ok(msg) = to_string(&rich_status) {
@@ -625,10 +640,10 @@ where
                     .save(height, LOG_TYPE_RICH_STATUS, msg)
                     .is_err()
                 {
-                    return Err(ConsensusError::BlockVerifyDiff);
+                    return Err(ConsensusError::SaveWalErr);
                 }
             } else {
-                return Err(ConsensusError::BlockVerifyDiff);
+                return Err(ConsensusError::SerJsonErr);
             }
         }
         let pre_hash = rich_status.clone().pre_hash;
@@ -646,7 +661,7 @@ where
         &mut self,
         msg: VerifyResp,
         need_wal: bool,
-    ) -> ConsensusResult<BftVerifyResp> {
+    ) -> Result<BftVerifyResp> {
         self.verified_block
             .entry(msg.block_hash.clone())
             .or_insert_with(|| msg.is_pass);
@@ -658,23 +673,23 @@ where
                     .save(self.height, LOG_TYPE_VERIFY_BLOCK_PESP, res)
                     .is_err()
                 {
-                    return Err(ConsensusError::BlockVerifyDiff);
+                    return Err(ConsensusError::SaveWalErr);
                 }
             } else {
-                return Err(ConsensusError::BlockVerifyDiff);
+                return Err(ConsensusError::SerJsonErr);
             }
         }
 
         Ok(verify_resp.to_bft_resp())
     }
 
-    fn check_proposer(&self, height: u64, round: u64, address: &[u8]) -> ConsensusResult<()> {
+    fn check_proposer(&self, height: u64, round: u64, address: &[u8]) -> Result<()> {
         if height < self.height - 1 {
             error!(
                 "The height {} is less than self.height {} - 1, which should not happen!",
                 height, self.height
             );
-            return Err(ConsensusError::BlockVerifyDiff);
+            return Err(ConsensusError::ObsoleteMsg);
         }
 
         let authorities = if height == self.authority.authority_h_old {
@@ -686,7 +701,7 @@ where
 
         if (*authorities).is_empty() {
             error!("The size of authority manage is empty!");
-            return Err(ConsensusError::BlockVerifyDiff);
+            return Err(ConsensusError::NoAuthorityList);
         }
 
         let mut auth_list = Vec::new();
@@ -704,15 +719,15 @@ where
                 "The proposer is invalid, while the rightful proposer is {:?}",
                 proposer
             );
-            Err(ConsensusError::BlockVerifyDiff)
+            Err(ConsensusError::InvalidProposer)
         }
     }
 
     fn check_lock_votes(
         &mut self,
-        signed_proposal: &SignedProposal,
+        signed_proposal: &SignedProposal<F>,
         proposal_hash: Hash,
-    ) -> ConsensusResult<()> {
+    ) -> Result<()> {
         let proposal = &signed_proposal.proposal;
         let height = proposal.height;
         if height < self.height - 1 {
@@ -720,13 +735,14 @@ where
                 "The height {} is less than self.height {} - 1, which should not happen!",
                 height, self.height
             );
-            return Err(ConsensusError::BlockVerifyDiff);
+            return Err(ConsensusError::ObsoleteMsg);
         }
 
         let mut map = HashMap::new();
         if let Some(lock_round) = proposal.lock_round {
             let votes = proposal.lock_votes.clone();
             for vote in votes.into_iter() {
+                // TODO
                 let sender =
                     self.check_signed_vote(height, lock_round, proposal_hash.clone(), vote)?;
                 if map.insert(sender, 1).is_some() {
@@ -747,7 +763,7 @@ where
         if map.len() * 3 > authority_n.len() * 2 {
             return Ok(());
         }
-        Err(ConsensusError::BlockVerifyDiff)
+        Err(ConsensusError::IllegalProposalLock)
     }
 
     fn check_signed_vote(
@@ -756,14 +772,14 @@ where
         round: u64,
         proposal_hash: Hash,
         signed_vote: SignedVote,
-    ) -> ConsensusResult<Address> {
+    ) -> Result<Address> {
         let vote = signed_vote.vote.clone();
         if height < self.height - 1 {
             error!(
                 "The vote's height {} is less than self.height {} - 1, which should not happen!",
                 height, self.height
             );
-            return Err(ConsensusError::BlockVerifyDiff);
+            return Err(ConsensusError::ObsoleteMsg);
         }
 
         let authorities = if height == self.authority.authority_h_old {
@@ -784,22 +800,22 @@ where
             proposal_weight: 1,
             vote_weight: 1,
         }) {
-            return Err(ConsensusError::BlockVerifyDiff);
+            return Err(ConsensusError::InvalidVoter);
         }
 
         let sig = signed_vote.signature.clone();
-        let hash = self.function.crypt_hash(&vote.rlp_bytes());
+        let hash = self.function.hash(&vote.rlp_bytes());
 
         let address = self.function.check_signature(&sig, &hash);
-        if address.is_none() {
-            return Err(ConsensusError::BlockVerifyDiff);
+        if address.is_err() {
+            return Err(ConsensusError::SupportErr);
         }
-        if address.clone().unwrap() != sender {
-            error!("The address recovers from the signature is {:?} which is mismatching with the sender {:?}!",
-                &address,
+        if address.unwrap() != sender {
+            error!(
+                "The address recovers from the signature is mismatching with the sender {:?}!",
                 &sender
             );
-            return Err(ConsensusError::BlockVerifyDiff);
+            return Err(ConsensusError::SignatureErr);
         }
 
         let bft_vote = vote.to_bft_vote();
@@ -808,7 +824,7 @@ where
         Ok(sender)
     }
 
-    fn check_proof(&mut self, height: u64, proof: &Proof) -> ConsensusResult<()> {
+    fn check_proof(&mut self, height: u64, proof: &Proof) -> Result<()> {
         if height != self.height {
             error!(
                 "The height {} is less than self.height {}, which should not happen!",
@@ -838,13 +854,13 @@ where
         Ok(())
     }
 
-    fn check_vote_sender(&self, height: u64, sender: &Address) -> ConsensusResult<()> {
+    fn check_vote_sender(&self, height: u64, sender: &Address) -> Result<()> {
         if height < self.height - 1 {
             error!(
                 "The height {} is less than self.height {} - 1, which should not happen!",
                 height, self.height
             );
-            return Err(ConsensusError::BlockVerifyDiff);
+            return Err(ConsensusError::ObsoleteMsg);
         }
 
         let authorities = if height == self.authority.authority_h_old {
@@ -860,18 +876,18 @@ where
             vote_weight: 1,
         }) {
             error!("The raw_bytes have invalid voter {:?}!", &sender);
-            return Err(ConsensusError::BlockVerifyDiff);
+            return Err(ConsensusError::InvalidVoter);
         }
         Ok(())
     }
 
-    fn goto_new_height(&mut self, height: u64) -> ConsensusResult<()> {
+    fn goto_new_height(&mut self, height: u64) -> Result<()> {
         self.verified_block.clear();
         self.block = None;
         self.height = height + 1;
         if self.wal_log.set_height(self.height).is_err() {
             error!("Wal log set height {} failed!", self.height);
-            return Err(ConsensusError::BlockVerifyDiff);
+            return Err(ConsensusError::SaveWalErr);
         };
         Ok(())
     }
@@ -900,8 +916,8 @@ where
                     block_hash: proof.block_hash.clone(),
                     voter: sender.clone(),
                 };
-                let hash = self.function.crypt_hash(&msg.rlp_bytes());
-                if let Some(address) = self.function.check_signature(&sig, &hash) {
+                let hash = self.function.hash(&msg.rlp_bytes());
+                if let Ok(address) = self.function.check_signature(&sig, &hash) {
                     if &address != sender {
                         return false;
                     }
