@@ -12,4 +12,3 @@ Cargo.lock
 # These are test outputs
 /test_output/
 
-/examples/wal
