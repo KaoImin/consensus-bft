@@ -14,9 +14,15 @@ pub enum ConsensusError {
     ///
     BftCoreErr,
     ///
+    ProofErr,
+    ///
     LoseBlock,
     ///
     LoseSignedVote,
+    ///
+    MissingProof,
+    ///
+    MissingPrevHash,
     ///
     NoVoteset,
     ///
