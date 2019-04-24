@@ -20,6 +20,11 @@ pub enum ConsensusInput<
     SignedVote(SignedVote),
     ///
     Status(Status),
+}
+
+pub(crate) enum AsyncMsg<
+    F: Encodable + Decodable + Clone + Send + 'static + Serialize + Deserialize<'static>,
+> {
     ///
     VerifyResp(VerifyResp),
     ///
@@ -244,7 +249,7 @@ pub struct Status {
     ///
     pub height: u64,
     ///
-    pub pre_hash: Hash,
+    pub prev_hash: Hash,
     ///
     pub interval: Option<u64>,
     ///
@@ -344,6 +349,11 @@ impl Node {
             proposal_weight: 1,
             vote_weight: 1,
         }
+    }
+
+    ///
+    pub fn get_address(&self) -> Address {
+        self.address
     }
 }
 
