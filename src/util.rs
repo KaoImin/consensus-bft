@@ -43,3 +43,11 @@ pub fn check_proof(
     }
     true
 }
+
+pub(crate) fn into_addr_set(node_set: Vec<Node>) -> Vec<Address> {
+    let mut set = Vec::new();
+    for node in node_set.into_iter() {
+        set.push(node.address);
+    }
+    set
+}
