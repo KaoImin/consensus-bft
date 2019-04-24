@@ -1,8 +1,8 @@
 use crate::types::{SignedProposal, SignedVote, VoteType};
 use bft_core::types::Vote as BftVote;
 use lru_cache::LruCache;
-use rlp::{Encodable, Decodable};
-use serde::{Serialize, Deserialize};
+use rlp::{Decodable, Encodable};
+use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 pub(crate) const CACHE_NUMBER: usize = 16;
@@ -152,7 +152,9 @@ pub(crate) struct SigVote {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct ProposalCollector<F: Encodable + Decodable + Clone + Send + 'static + Serialize + Deserialize<'static>> {
+pub(crate) struct ProposalCollector<
+    F: Encodable + Decodable + Clone + Send + 'static + Serialize + Deserialize<'static>,
+> {
     pub(crate) proposals: LruCache<u64, ProposalRoundCollector<F>>,
 }
 
