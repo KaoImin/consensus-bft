@@ -336,7 +336,7 @@ impl Node {
 
     ///
     pub fn get_address(&self) -> Address {
-        self.address
+        self.address.clone()
     }
 }
 

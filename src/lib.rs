@@ -7,11 +7,11 @@
 
 use crate::types::{Address, Commit, ConsensusOutput};
 use rlp::{Decodable, Encodable};
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, ser::Serialize};
 
 ///
 pub trait ConsensusSupport<
-    F: Encodable + Decodable + Clone + Send + 'static + Serialize + Deserialize<'static>,
+    F: Encodable + Decodable + Clone + Send + 'static + Serialize + DeserializeOwned,
 >
 {
     ///

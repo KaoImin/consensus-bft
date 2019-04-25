@@ -2,7 +2,7 @@ use crate::types::{SignedProposal, SignedVote, VoteType};
 use bft_core::types::Vote as BftVote;
 use lru_cache::LruCache;
 use rlp::{Decodable, Encodable};
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Serialize};
 use std::collections::HashMap;
 
 pub(crate) const CACHE_NUMBER: usize = 16;
@@ -153,14 +153,14 @@ pub(crate) struct SigVote {
 
 #[derive(Clone, Debug)]
 pub(crate) struct ProposalCollector<
-    F: Encodable + Decodable + Clone + Send + 'static + Serialize + Deserialize<'static>,
+    F: Encodable + Decodable + Clone + Send + 'static + Serialize + DeserializeOwned,
 > {
     pub(crate) proposals: LruCache<u64, ProposalRoundCollector<F>>,
 }
 
 impl<F> ProposalCollector<F>
 where
-    F: Encodable + Decodable + Clone + Send + 'static + Serialize + Deserialize<'static>,
+    F: Encodable + Decodable + Clone + Send + 'static + Serialize + DeserializeOwned,
 {
     pub(crate) fn new() -> Self {
         ProposalCollector {
@@ -191,14 +191,14 @@ where
 
 #[derive(Clone, Debug)]
 pub(crate) struct ProposalRoundCollector<
-    F: Encodable + Decodable + Clone + Send + 'static + Serialize + Deserialize<'static>,
+    F: Encodable + Decodable + Clone + Send + 'static + Serialize + DeserializeOwned,
 > {
     pub(crate) round_proposals: LruCache<u64, SignedProposal<F>>,
 }
 
 impl<F> ProposalRoundCollector<F>
 where
-    F: Encodable + Decodable + Clone + Send + 'static + Serialize + Deserialize<'static>,
+    F: Encodable + Decodable + Clone + Send + 'static + Serialize + DeserializeOwned,
 {
     pub(crate) fn new() -> Self {
         ProposalRoundCollector {

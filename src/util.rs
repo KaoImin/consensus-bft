@@ -1,10 +1,10 @@
 use crate::types::*;
 use rlp::{Decodable, Encodable};
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Serialize};
 
 ///
 pub fn check_proof<
-    F: Encodable + Decodable + Encodable + Clone + Send + 'static + Serialize + Deserialize<'static>,
+    F: Encodable + Decodable + Encodable + Clone + Send + 'static + Serialize + DeserializeOwned,
 >(
     proof: Proof<F>,
     height: u64,
