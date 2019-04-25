@@ -151,6 +151,17 @@ where
     fn async_process(&mut self, msg: AsyncMsg<F>) -> Result<()> {
         match msg {
             AsyncMsg::VerifyResp(vr) => {
+                let hash = self.function.hash(&vr.proposal.rlp_bytes());
+                self.verified_block
+                    .entry(hash.clone())
+                    .or_insert(vr.is_pass);
+                self.bft
+                    .to_bft_core(BftMsg::VerifyResp(BftVerifyResp {
+                        is_pass: vr.is_pass,
+                        proposal: hash,
+                    }))
+                    .map_err(|_| ConsensusError::SendMsgErr)?;
+
                 if let Ok(res) = to_string(&vr) {
                     if self
                         .wal_log
@@ -164,6 +175,14 @@ where
                 }
             }
             AsyncMsg::Feed(f) => {
+                let hash = self.function.hash(&f.content.rlp_bytes());
+                self.bft
+                    .to_bft_core(BftMsg::Feed(BftFeed {
+                        height: f.height,
+                        proposal: hash.clone(),
+                    }))
+                    .map_err(|_| ConsensusError::SendMsgErr)?;
+
                 if let Ok(msg) = to_string(&f) {
                     if self
                         .wal_log
@@ -213,7 +232,6 @@ where
                 self.send_cache_vote(self.height)?;
                 Ok(())
             }
-            _ => panic!("invialid type"),
         }
     }
 
@@ -242,7 +260,7 @@ where
             }
             BftMsg::GetProposalRequest(h) => {
                 info!("Receive get proposal request");
-                self.ask_for_proposal(h, true);
+                self.ask_for_proposal(h);
                 Ok(())
             }
             _ => panic!("BFT Core Error!"),
@@ -325,12 +343,13 @@ where
         let hash = proposal.content;
         let lock_round = proposal.lock_round;
 
-        let lock_votes = if let Some(res) = proposal.lock_round {
+        let lock_votes = if proposal.lock_round.is_some() {
             let mut res = Vec::new();
             let vote_set = self
                 .votes
                 .get_vote_set(height, round, VoteType::Prevote)
-                .expect("Build SignedVote Error!");
+                .ok_or(0)
+                .map_err(|_| ConsensusError::NoVoteset)?;
             for vote in proposal.lock_votes.into_iter() {
                 if let Some(v) = vote_set.vote_pair.get(&vote) {
                     res.push(v.to_owned());
@@ -360,14 +379,11 @@ where
         };
         // sig
         let hash = self.function.hash(&signed_proposal.rlp_bytes());
-        let sig = self.function.sign(&hash);
-        if sig.is_err() {
-            return Err(ConsensusError::SupportErr);
-        }
+        let sig = self.function.sign(&hash).map_err(|_| ConsensusError::SupportErr)?;
 
         Ok(SignedProposal {
             proposal: signed_proposal,
-            signature: sig.unwrap(),
+            signature: sig,
         })
     }
 
@@ -456,9 +472,8 @@ where
         }
     }
 
-    fn ask_for_proposal(&mut self, height: u64, need_wal: bool) {
+    fn ask_for_proposal(&mut self, height: u64) {
         let func = self.function.clone();
-        let bft = self.bft.clone();
         let sender = self.async_send.clone();
 
         crossbeam_thread::scope(|s| {
@@ -474,28 +489,6 @@ where
             });
         })
         .unwrap();
-
-        // crossbeam_thread::scope(|s| {
-        //     s.spawn(move |_| {
-        //         if let Ok(proposal) = func.get_block(height) {
-        //             let hash = self.function.hash(&proposal.rlp_bytes());
-        //             let _ = bft.to_bft_core(BftMsg::Feed(BftFeed {
-        //                 height,
-        //                 proposal: hash.clone(),
-        //             }));
-        //             self.block_cache.entry(hash).or_insert(proposal.clone());
-        //             if need_wal {
-        //                 sender
-        //                     .send(AsyncMsg::Feed(Feed {
-        //                         content: proposal,
-        //                         height,
-        //                     }))
-        //                     .unwrap();
-        //             }
-        //         }
-        //     })
-        // })
-        // .unwrap();
     }
 
     fn verify_proposal(&mut self, proposal: F) {
@@ -505,11 +498,7 @@ where
 
         crossbeam_thread::scope(|s| {
             s.spawn(|_| {
-                let is_pass = if func.check_block(proposal.clone(), height).is_ok() {
-                    true
-                } else {
-                    false
-                };
+                let is_pass = func.check_block(proposal.clone(), height).is_ok();
                 sender
                     .send(AsyncMsg::VerifyResp(VerifyResp {
                         is_pass,
@@ -519,32 +508,6 @@ where
             });
         })
         .unwrap();
-
-        // crossbeam_thread::scope(|s| {
-        //     s.spawn(move |_| {
-        //         let is_pass = match func.check_block(proposal, self.height) {
-        //             Ok(()) => true,
-        //             Err(e) => false,
-        //         };
-        //         let hash = func.hash(&proposal.rlp_bytes());
-        //         self.verified_block.entry(hash.clone()).or_insert(is_pass);
-        //         bft.to_bft_core(BftMsg::VerifyResp(BftVerifyResp {
-        //             is_pass,
-        //             proposal: hash,
-        //         }))
-        //         .unwrap();
-
-        //         if need_wal {
-        //             sender
-        //                 .send(AsyncMsg::VerifyResp(VerifyResp {
-        //                     is_pass,
-        //                     proposal: func.hash(&proposal.rlp_bytes()),
-        //                 }))
-        //                 .unwrap();
-        //         }
-        //     })
-        // })
-        // .unwrap();
     }
 
     fn generate_proof(
@@ -558,7 +521,8 @@ where
         if let Some(vote_set) = self.votes.get_vote_set(height, round, VoteType::Precommit) {
             for v in vote.into_iter() {
                 if let Some(signed_vote) = vote_set.vote_pair.get(&v) {
-                    tmp.entry(v.voter).or_insert(signed_vote.signature.clone());
+                    tmp.entry(v.voter)
+                        .or_insert_with(|| signed_vote.signature.clone());
                 } else {
                     return Err(ConsensusError::LoseSignedVote);
                 }
@@ -585,15 +549,15 @@ where
         let sig = msg.signature.clone();
         let proposal = msg.proposal.clone();
         let hash = self.function.hash(&proposal.rlp_bytes());
-        let address = self.function.check_signature(&sig, &hash);
-        if address.is_err() {
-            return Err(ConsensusError::SupportErr);
-        }
+        let address = self
+            .function
+            .check_signature(&sig, &hash)
+            .map_err(|_| ConsensusError::SupportErr)?;
 
         let height = proposal.height;
         let round = proposal.round;
 
-        if proposal.proposer != address.unwrap() {
+        if proposal.proposer != address {
             return Err(ConsensusError::SignatureErr);
         }
 
@@ -609,7 +573,7 @@ where
         let hash = self.function.hash(&content.rlp_bytes());
         self.block_cache
             .entry(hash.clone())
-            .or_insert(content.clone());
+            .or_insert_with(|| content.clone());
 
         if height >= self.height {
             if height - self.height < CACHE_NUMBER as u64 && need_wal {
@@ -675,10 +639,10 @@ where
 
         // check signature
         let hash = self.function.hash(&msg.rlp_bytes());
-        let address = self.function.check_signature(&sig, &hash);
-        if address.is_err() {
-            return Err(ConsensusError::SupportErr);
-        }
+        let address = self
+            .function
+            .check_signature(&sig, &hash)
+            .map_err(|_| ConsensusError::SupportErr)?;
 
         let height = vote.height;
         let round = vote.round;
@@ -690,7 +654,7 @@ where
             );
             return Err(ConsensusError::ObsoleteMsg);
         }
-        let address = address.unwrap();
+        let address = address;
         if sender != address {
             error!("The address recovers from the signature is {:?} which is mismatching with the sender {:?}!", &address, &sender);
             return Err(ConsensusError::SignatureErr);
@@ -920,7 +884,7 @@ where
         Ok(())
     }
 
-    fn check_vote_sender(&self, height: u64, sender: &Address) -> Result<()> {
+    fn check_vote_sender(&self, height: u64, sender: &[u8]) -> Result<()> {
         let authorities = if height == self.authority.authority_h_old {
             info!("Cita-bft sets the authority manage with old authorities!");
             into_addr_set(self.authority.authorities_old.clone())
@@ -928,7 +892,7 @@ where
             into_addr_set(self.authority.authorities.clone())
         };
 
-        if !authorities.contains(&sender) {
+        if !authorities.contains(&sender.to_vec()) {
             error!("The raw_bytes have invalid voter {:?}!", &sender);
             return Err(ConsensusError::InvalidVoter);
         }
@@ -1038,7 +1002,9 @@ where
                             proposal: hash.clone(),
                         }))
                         .expect("Cita-bft hands over bft_status failed!");
-                    self.block_cache.entry(hash).or_insert(msg.content.clone());
+                    self.block_cache
+                        .entry(hash)
+                        .or_insert_with(|| msg.content.clone());
                 }
                 LOG_TYPE_VERIFY_BLOCK_PESP => {
                     info!("Cita-bft loads verify_block_resp message!");
