@@ -1,7 +1,7 @@
 use crate::consensus::INIT_HEIGHT;
 use bft_core::types as bft;
 use rlp::{Decodable, Encodable, RlpStream};
-use serde::{Deserialize, Serialize};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::collections::HashMap;
 
 ///
@@ -12,7 +12,7 @@ pub type Hash = Vec<u8>;
 ///
 #[derive(Debug, Clone)]
 pub enum ConsensusInput<
-    F: Encodable + Decodable + Clone + Send + 'static + Serialize + Deserialize<'static>,
+    F: Encodable + Decodable + Clone + Send + 'static + Serialize + DeserializeOwned,
 > {
     ///
     SignedProposal(SignedProposal<F>),
@@ -22,8 +22,9 @@ pub enum ConsensusInput<
     Status(Status),
 }
 
+#[derive(Debug, Clone)]
 pub(crate) enum AsyncMsg<
-    F: Encodable + Decodable + Clone + Send + 'static + Serialize + Deserialize<'static>,
+    F: Encodable + Decodable + Clone + Send + 'static + Serialize + DeserializeOwned,
 > {
     ///
     VerifyResp(VerifyResp),
@@ -34,7 +35,7 @@ pub(crate) enum AsyncMsg<
 ///
 #[derive(Debug, Clone)]
 pub enum ConsensusOutput<
-    F: Encodable + Decodable + Clone + Send + 'static + Serialize + Deserialize<'static>,
+    F: Encodable + Decodable + Clone + Send + 'static + Serialize + DeserializeOwned,
 > {
     ///
     SignedProposal(SignedProposal<F>),
@@ -65,9 +66,10 @@ impl Into<u8> for VoteType {
 ///
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct SignedProposal<
-    F: Encodable + Decodable + Clone + Send + 'static + Serialize + Deserialize<'static>,
+    F: Encodable + Decodable + Clone + Send + 'static + Serialize + DeserializeOwned,
 > {
     ///
+    #[serde(bound(deserialize = "F: DeserializeOwned"))]
     pub proposal: Proposal<F>,
     ///
     pub signature: Vec<u8>,
@@ -76,16 +78,18 @@ pub struct SignedProposal<
 ///
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct Proposal<
-    F: Encodable + Decodable + Clone + Send + 'static + Serialize + Deserialize<'static>,
+    F: Encodable + Decodable + Clone + Send + 'static + Serialize + DeserializeOwned,
 > {
     ///
     pub height: u64,
     ///
     pub round: u64,
     ///
+    #[serde(bound(deserialize = "F: DeserializeOwned"))]
     pub content: F,
     ///
-    pub proof: Proof,
+    #[serde(bound(deserialize = "F: DeserializeOwned"))]
+    pub proof: Proof<F>,
     ///
     pub lock_round: Option<u64>,
     ///
@@ -96,14 +100,7 @@ pub struct Proposal<
 
 impl<F> Encodable for Proposal<F>
 where
-    F: Encodable
-        + Decodable
-        + Clone
-        + Send
-        + 'static
-        + Serialize
-        + Deserialize<'static>
-        + Encodable,
+    F: Encodable + Decodable + Encodable + Clone + Send + 'static + Serialize + DeserializeOwned,
 {
     fn rlp_append(&self, s: &mut RlpStream) {
         s.append(&self.height)
@@ -118,14 +115,7 @@ where
 
 impl<F> Proposal<F>
 where
-    F: Encodable
-        + Decodable
-        + Clone
-        + Send
-        + 'static
-        + Serialize
-        + Deserialize<'static>
-        + Encodable,
+    F: Encodable + Decodable + Encodable + Clone + Send + 'static + Serialize + DeserializeOwned,
 {
     ///
     pub fn to_bft_proposal(&self, hash: Vec<u8>) -> bft::Proposal {
@@ -221,24 +211,18 @@ impl Vote {
 
 ///
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-pub struct Commit<
-    F: Encodable
-        + Decodable
-        + Clone
-        + Send
-        + 'static
-        + Serialize
-        + Deserialize<'static>
-        + Deserialize<'static>,
-> {
+pub struct Commit<F: Encodable + Decodable + Clone + Send + 'static + Serialize + DeserializeOwned>
+{
     ///
     pub height: u64,
     ///
+    #[serde(bound(deserialize = "F: DeserializeOwned"))]
     pub result: F,
     ///
     pub prev_hash: Hash,
     ///
-    pub proof: Proof,
+    #[serde(bound(deserialize = "F: DeserializeOwned"))]
+    pub proof: Proof<F>,
     ///
     pub address: Address,
 }
@@ -273,12 +257,11 @@ impl Status {
 
 ///
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-pub struct Feed<
-    F: Encodable + Decodable + Clone + Send + 'static + Serialize + Deserialize<'static>,
-> {
+pub struct Feed<F: Encodable + Decodable + Clone + Send + 'static + Serialize + DeserializeOwned> {
     /// The height of the proposal.
     pub height: u64,
     /// A proposal.
+    #[serde(bound(deserialize = "F: DeserializeOwned"))]
     pub content: F,
 }
 
@@ -359,9 +342,10 @@ impl Node {
 
 ///
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-pub struct Proof {
+pub struct Proof<F: Encodable + Decodable + Clone + Send + 'static + Serialize + DeserializeOwned> {
     ///
-    pub block_hash: Hash,
+    #[serde(bound(deserialize = "F: DeserializeOwned"))]
+    pub block_hash: F,
     ///
     pub height: u64,
     ///
@@ -370,9 +354,12 @@ pub struct Proof {
     pub precommit_votes: HashMap<Address, Vec<u8>>,
 }
 
-impl Encodable for Proof {
+impl<F> Encodable for Proof<F>
+where
+    F: Encodable + Decodable + Encodable + Clone + Send + 'static + Serialize + DeserializeOwned,
+{
     fn rlp_append(&self, s: &mut RlpStream) {
-        s.append_list(&self.block_hash)
+        s.append(&self.block_hash)
             .append(&self.height)
             .append(&self.round);
 
