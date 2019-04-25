@@ -3,11 +3,9 @@ extern crate consensus_bft as BFT;
 extern crate criterion;
 
 use crate::types::*;
-use bincode::serialize;
 use criterion::{Benchmark, Criterion};
-use crossbeam::crossbeam_channel::unbounded;
+use crossbeam_channel::unbounded;
 use rand::random;
-use rlp::Encodable;
 use std::collections::HashMap;
 use BFT::*;
 
@@ -21,50 +19,9 @@ fn bench_proof() -> Vec<u8> {
 }
 
 #[inline(always)]
-fn gen_mb() -> Vec<u8> {
-    let mb: Vec<u8> = (0..1024 * 1024 * 3).map(|_| random::<u8>()).collect();
+fn gen_mb(size: usize) -> Vec<u8> {
+    let mb: Vec<u8> = (0..1024 * 1024 * size).map(|_| random::<u8>()).collect();
     mb
-}
-
-fn bench_bincode(content: Vec<u8>) {
-    let proof = Proof {
-        block_hash: bench_proof(),
-        height: 0,
-        round: 0,
-        precommit_votes: HashMap::new(),
-    };
-
-    let proposal = Proposal {
-        height: 0,
-        round: 0,
-        content,
-        proof,
-        lock_round: None,
-        lock_votes: Vec::new(),
-        proposer: vec![3],
-    };
-    serialize(&proposal).unwrap();
-}
-
-fn bench_rlp(content: Vec<u8>) {
-    let proof = Proof {
-        block_hash: bench_proof(),
-        height: 0,
-        round: 0,
-        precommit_votes: HashMap::new(),
-    };
-
-    let proposal = Proposal {
-        height: 0,
-        round: 0,
-        content,
-        proof,
-        lock_round: None,
-        lock_votes: Vec::new(),
-        proposer: vec![3],
-    };
-
-    proposal.rlp_bytes();
 }
 
 fn bench_to_proposal(content: Vec<u8>) {
@@ -114,29 +71,11 @@ fn bench_proposal(content: Vec<u8>) {
     r.recv().unwrap();
 }
 
-fn bench_to_status() {
-    let (s, r) = unbounded();
-    let node = Node {
-        address: vec![1],
-        proposal_weight: 1,
-        vote_weight: 1,
-    };
-    let status = Status {
-        height: 0,
-        pre_hash: vec![123],
-        interval: None,
-        authority_list: vec![node],
-    };
-    let res = status.to_bft_status();
-    s.send(res).unwrap();
-    r.recv().unwrap();
-}
-
 fn criterion_benchmark(c: &mut Criterion) {
-    let mb = gen_mb();
+    let mb = gen_mb(3);
     c.bench(
         "consensus",
-        Benchmark::new("bench", move |b| b.iter(|| bench_bincode(mb.clone()))),
+        Benchmark::new("bench", move |b| b.iter(|| bench_proposal(mb.clone()))),
     );
 }
 
