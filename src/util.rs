@@ -9,8 +9,8 @@ pub fn check_proof<
     proof: Proof<F>,
     height: u64,
     authority: Vec<Node>,
-    crypt_hash: fn(msg: &[u8]) -> Vec<u8>,
-    check_signature: fn(signature: &[u8], hash: &[u8]) -> Option<Address>,
+    crypt_hash: impl Fn(&[u8]) -> Vec<u8>,
+    check_signature: impl Fn(&[u8], &[u8]) -> Option<Address>,
 ) -> bool {
     if height == 0 {
         return true;
