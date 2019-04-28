@@ -80,13 +80,3 @@ fn main() {
     .join()
     .unwrap();
 }
-
-#[cfg(test)]
-mod test {
-    use super::BftContent;
-    #[test]
-    fn test_rlp() {
-        let a = BftContent(vec![1, 2, 3, 4, 5]);
-        println!("{:?}", a.rlp_bytes());
-    }
-}
