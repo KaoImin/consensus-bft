@@ -8,11 +8,12 @@
 use crate::types::{Address, Commit, ConsensusOutput};
 use rlp::{Decodable, Encodable};
 use serde::{de::DeserializeOwned, ser::Serialize};
+use std::fmt::Debug;
 
 ///
 pub trait ConsensusSupport<F: Content + Sync> {
     ///
-    type Error: ::std::fmt::Debug;
+    type Error: Debug;
     ///
     fn get_block(&self, height: u64) -> Result<F, Self::Error>;
     ///
@@ -31,7 +32,7 @@ pub trait ConsensusSupport<F: Content + Sync> {
 
 ///
 pub trait Content:
-    Encodable + Decodable + Clone + Send + 'static + Serialize + DeserializeOwned
+    Encodable + Decodable + Clone + Debug + Send + 'static + Serialize + DeserializeOwned
 {
 }
 
