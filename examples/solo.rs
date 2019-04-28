@@ -6,6 +6,7 @@ use consensus_bft::{
     Content,
 };
 use crossbeam_channel::bounded;
+use env_logger::Builder;
 use rand::random;
 use rlp::{Decodable, DecoderError, Encodable, Rlp, RlpStream};
 use serde::{Deserialize, Serialize};
@@ -19,9 +20,7 @@ impl Content for BftContent {}
 
 impl BftContent {
     pub(crate) fn new(size: usize) -> Self {
-        let mb = (0..1024 * 1024 * size)
-            .map(|_| random::<u8>())
-            .collect::<Vec<_>>();
+        let mb = (0..10 * size).map(|_| random::<u8>()).collect::<Vec<_>>();
         BftContent(mb)
     }
 }
@@ -42,20 +41,24 @@ impl Decodable for BftContent {
 }
 
 fn main() {
+    let mut builder = Builder::from_default_env();
+    builder.filter(None, log::LevelFilter::Debug).init();
+
     let (s_proposal, r_proposal) = bounded::<BftContent>(1);
     let (s_signal, r_signal) = bounded::<u64>(1);
     let support = Support::new(vec![1, 2, 3], s_signal, r_proposal);
-    let executor = ConsensusExecutor::new(support, vec![1, 2, 3], "example/wal");
+    let executor = ConsensusExecutor::new(support, vec![1, 2, 3], "examples/wal/log");
 
     thread::spawn(move || {
         executor
             .send(ConsensusInput::Status(Status {
-                height: 1,
+                height: 0,
                 interval: None,
                 authority_list: vec![Node::new(vec![1, 2, 3])],
                 prev_hash: vec![0, 0, 0],
             }))
             .unwrap();
+        println!("Send Genesis");
 
         loop {
             s_proposal.send(BftContent::new(1)).unwrap();
@@ -73,5 +76,17 @@ fn main() {
                     .unwrap();
             }
         }
-    });
+    })
+    .join()
+    .unwrap();
+}
+
+#[cfg(test)]
+mod test {
+    use super::BftContent;
+    #[test]
+    fn test_rlp() {
+        let a = BftContent(vec![1, 2, 3, 4, 5]);
+        println!("{:?}", a.rlp_bytes());
+    }
 }
