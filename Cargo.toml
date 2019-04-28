@@ -28,3 +28,7 @@ async_verify = ["bft-core/async_verify"]
 name = "example"
 path = "benches/bench.rs"
 harness = false
+
+[[example]]
+name = "solo"
+path = "examples/solo.rs"
