@@ -379,7 +379,10 @@ where
         };
         // sig
         let hash = self.function.hash(&signed_proposal.rlp_bytes());
-        let sig = self.function.sign(&hash).map_err(|_| ConsensusError::SupportErr)?;
+        let sig = self
+            .function
+            .sign(&hash)
+            .map_err(|_| ConsensusError::SupportErr)?;
 
         Ok(SignedProposal {
             proposal: signed_proposal,
