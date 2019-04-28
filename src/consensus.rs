@@ -130,17 +130,17 @@ where
         // self.load_wal_log();
         thread::spawn(move || {
             let mut engine = Consensus::new(support, address, recv, wal_path);
-            engine.load_wal_log();
+            // engine.load_wal_log();
             loop {
                 select! {
                     recv(engine.bft_recv) -> bft_msg => if let Ok(bft_msg) = bft_msg {
-                        let _ = engine.core_process(bft_msg);
+                        let _ = engine.core_process(bft_msg).map_err(|err| panic!("Consensus Error {:?}", err));
                     },
                     recv(engine.interface_recv) -> external_msg => if let Ok(external_msg) = external_msg {
-                        let _ = engine.external_process(external_msg);
+                        let _ = engine.external_process(external_msg).map_err(|err| panic!("Consensus Error {:?}", err));
                     },
                     recv(engine.async_recv) -> async_msg => if let Ok(async_msg) = async_msg {
-                        let _ = engine.async_process(async_msg);
+                        let _ = engine.async_process(async_msg).map_err(|err| panic!("Consensus Error {:?}", err));
                     },
                 }
             }
@@ -150,7 +150,7 @@ where
     fn async_process(&mut self, msg: AsyncMsg<F>) -> Result<()> {
         match msg {
             AsyncMsg::VerifyResp(vr) => {
-                let hash = self.function.hash(&vr.proposal.rlp_bytes());
+                let hash = vr.proposal.clone();
                 self.verified_block
                     .entry(hash.clone())
                     .or_insert(vr.is_pass);
@@ -182,6 +182,9 @@ where
                     }))
                     .map_err(|_| ConsensusError::SendMsgErr)?;
 
+                self.block_cache
+                    .entry(hash)
+                    .or_insert_with(|| f.content.clone());
                 if let Ok(msg) = to_string(&f) {
                     if self
                         .wal_log
@@ -226,15 +229,19 @@ where
                 let status = self.handle_rich_status(rs.clone(), true)?;
 
                 if into_addr_set(rs.authority_list).contains(&self.address) {
-                    self.consensus_power = true;
-                    self.bft
-                        .to_bft_core(BftMsg::Start)
-                        .map_err(|_| ConsensusError::SendMsgErr)?;
+                    if !self.consensus_power {
+                        self.consensus_power = true;
+                        self.bft
+                            .to_bft_core(BftMsg::Start)
+                            .map_err(|_| ConsensusError::SendMsgErr)?;
+                    }
                 } else {
-                    self.consensus_power = false;
-                    self.bft
-                        .to_bft_core(BftMsg::Pause)
-                        .map_err(|_| ConsensusError::SendMsgErr)?;
+                    if self.consensus_power {
+                        self.consensus_power = false;
+                        self.bft
+                            .to_bft_core(BftMsg::Pause)
+                            .map_err(|_| ConsensusError::SendMsgErr)?;
+                    }
                 }
                 self.bft
                     .send_status(BftMsg::Status(status))
@@ -330,6 +337,13 @@ where
             );
             return Err(ConsensusError::BftCoreErr);
         }
+
+        if let Some(origin_proposal) = self.block_cache.get(&proposal.content) {
+            self.verify_proposal(origin_proposal.to_owned());
+        } else {
+            return Err(ConsensusError::LoseBlock);
+        }
+
         if need_wal {
             if let Ok(msg) = to_string(&proposal) {
                 if self.wal_log.save(height, LOG_TYPE_PROPOSAL, msg).is_err() {
@@ -345,7 +359,7 @@ where
     }
 
     fn build_signed_proposal(&mut self, proposal: BftProposal) -> Result<SignedProposal<F>> {
-        if self.proof.is_none() {
+        if self.proof.is_none() && (self.height != 1) {
             return Err(ConsensusError::MissingProof);
         }
 
@@ -379,11 +393,22 @@ where
             return Err(ConsensusError::LoseBlock);
         };
 
+        let proof = if self.height == 1 {
+            Proof {
+                height: 0,
+                round: 0,
+                block_hash: content.clone(),
+                precommit_votes: HashMap::new(),
+            }
+        } else {
+            self.proof.clone().unwrap()
+        };
+
         let signed_proposal = Proposal {
             height,
             round,
             content,
-            proof: self.proof.clone().unwrap(),
+            proof,
             lock_round,
             lock_votes,
             proposer: proposal.proposer,
@@ -475,8 +500,9 @@ where
                     prev_hash: prev_hash.to_owned(),
                     result: proposal,
                     address: commit.address,
-                    proof,
+                    proof: proof.clone(),
                 };
+                self.proof = Some(proof);
                 return Ok(res);
             } else {
                 return Err(ConsensusError::MissingPrevHash);
@@ -513,6 +539,7 @@ where
         crossbeam_thread::scope(|s| {
             s.spawn(|_| {
                 let is_pass = func.check_block(proposal.clone(), height).is_ok();
+                info!("Receive verify result {:?} at height {:?}", is_pass, height);
                 sender
                     .send(AsyncMsg::VerifyResp(VerifyResp {
                         is_pass,
@@ -958,6 +985,7 @@ where
         true
     }
 
+    #[warn(dead_code)]
     fn load_wal_log(&mut self) {
         info!("Cita-bft starts to load wal log!");
         let vec_buf = self.wal_log.load();
