@@ -1,4 +1,7 @@
-use crate::types::{SignedProposal, SignedVote, VoteType};
+use crate::{
+    types::{SignedProposal, SignedVote, VoteType},
+    Content,
+};
 use bft_core::types::Vote as BftVote;
 use lru_cache::LruCache;
 use rlp::{Decodable, Encodable};
@@ -152,15 +155,13 @@ pub(crate) struct SigVote {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct ProposalCollector<
-    F: Encodable + Decodable + Clone + Send + 'static + Serialize + DeserializeOwned,
-> {
+pub(crate) struct ProposalCollector<F: Content + Sync> {
     pub(crate) proposals: LruCache<u64, ProposalRoundCollector<F>>,
 }
 
 impl<F> ProposalCollector<F>
 where
-    F: Encodable + Decodable + Clone + Send + 'static + Serialize + DeserializeOwned,
+    F: Content + Sync,
 {
     pub(crate) fn new() -> Self {
         ProposalCollector {
@@ -182,7 +183,7 @@ where
         }
     }
 
-    // ub(crate) fn get_proposal(&mut self, height: u64, round: u64) -> Option<SignedProposal> {
+    // pub(crate) fn get_proposal(&mut self, height: u64, round: u64) -> Option<SignedProposal> {
     //     self.proposals
     //         .get_mut(&height)
     //         .and_then(|prc| prc.get_proposal(round))
@@ -190,15 +191,13 @@ where
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct ProposalRoundCollector<
-    F: Encodable + Decodable + Clone + Send + 'static + Serialize + DeserializeOwned,
-> {
+pub(crate) struct ProposalRoundCollector<F: Content + Sync> {
     pub(crate) round_proposals: LruCache<u64, SignedProposal<F>>,
 }
 
 impl<F> ProposalRoundCollector<F>
 where
-    F: Encodable + Decodable + Clone + Send + 'static + Serialize + DeserializeOwned,
+    F: Content + Sync,
 {
     pub(crate) fn new() -> Self {
         ProposalRoundCollector {

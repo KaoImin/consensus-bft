@@ -1,4 +1,4 @@
-use crate::consensus::INIT_HEIGHT;
+use crate::{consensus::INIT_HEIGHT, Content};
 use bft_core::types as bft;
 use rlp::{Decodable, Encodable, RlpStream};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
@@ -11,9 +11,7 @@ pub type Hash = Vec<u8>;
 
 ///
 #[derive(Debug, Clone)]
-pub enum ConsensusInput<
-    F: Encodable + Decodable + Clone + Send + 'static + Serialize + DeserializeOwned,
-> {
+pub enum ConsensusInput<F: Content + Sync> {
     ///
     SignedProposal(SignedProposal<F>),
     ///
@@ -23,9 +21,7 @@ pub enum ConsensusInput<
 }
 
 #[derive(Debug, Clone)]
-pub(crate) enum AsyncMsg<
-    F: Encodable + Decodable + Clone + Send + 'static + Serialize + DeserializeOwned,
-> {
+pub(crate) enum AsyncMsg<F: Content + Sync> {
     ///
     VerifyResp(VerifyResp),
     ///
@@ -34,9 +30,7 @@ pub(crate) enum AsyncMsg<
 
 ///
 #[derive(Debug, Clone)]
-pub enum ConsensusOutput<
-    F: Encodable + Decodable + Clone + Send + 'static + Serialize + DeserializeOwned,
-> {
+pub enum ConsensusOutput<F: Content + Sync> {
     ///
     SignedProposal(SignedProposal<F>),
     ///
@@ -65,9 +59,7 @@ impl Into<u8> for VoteType {
 
 ///
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-pub struct SignedProposal<
-    F: Encodable + Decodable + Clone + Send + 'static + Serialize + DeserializeOwned,
-> {
+pub struct SignedProposal<F: Content + Sync> {
     ///
     #[serde(bound(deserialize = "F: DeserializeOwned"))]
     pub proposal: Proposal<F>,
@@ -77,9 +69,7 @@ pub struct SignedProposal<
 
 ///
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-pub struct Proposal<
-    F: Encodable + Decodable + Clone + Send + 'static + Serialize + DeserializeOwned,
-> {
+pub struct Proposal<F: Content + Sync> {
     ///
     pub height: u64,
     ///
@@ -100,7 +90,7 @@ pub struct Proposal<
 
 impl<F> Encodable for Proposal<F>
 where
-    F: Encodable + Decodable + Encodable + Clone + Send + 'static + Serialize + DeserializeOwned,
+    F: Content + Sync,
 {
     fn rlp_append(&self, s: &mut RlpStream) {
         s.append(&self.height)
@@ -115,7 +105,7 @@ where
 
 impl<F> Proposal<F>
 where
-    F: Encodable + Decodable + Encodable + Clone + Send + 'static + Serialize + DeserializeOwned,
+    F: Content + Sync,
 {
     ///
     pub fn to_bft_proposal(&self, hash: Vec<u8>) -> bft::Proposal {
@@ -356,7 +346,7 @@ pub struct Proof<F: Encodable + Decodable + Clone + Send + 'static + Serialize +
 
 impl<F> Encodable for Proof<F>
 where
-    F: Encodable + Decodable + Encodable + Clone + Send + 'static + Serialize + DeserializeOwned,
+    F: Content + Sync,
 {
     fn rlp_append(&self, s: &mut RlpStream) {
         s.append(&self.block_hash)

@@ -10,10 +10,7 @@ use rlp::{Decodable, Encodable};
 use serde::{de::DeserializeOwned, ser::Serialize};
 
 ///
-pub trait ConsensusSupport<
-    F: Encodable + Decodable + Clone + Send + 'static + Serialize + DeserializeOwned,
->
-{
+pub trait ConsensusSupport<F: Content + Sync> {
     ///
     type Error: ::std::fmt::Debug;
     ///
@@ -30,6 +27,12 @@ pub trait ConsensusSupport<
     fn check_signature(&self, signature: &[u8], hash: &[u8]) -> Result<Address, Self::Error>;
     ///
     fn hash(&self, msg: &[u8]) -> Vec<u8>;
+}
+
+///
+pub trait Content:
+    Encodable + Decodable + Clone + Send + 'static + Serialize + DeserializeOwned
+{
 }
 
 ///

@@ -1,5 +1,6 @@
 use crate::{
-    collection::*, error::ConsensusError, types::*, util::into_addr_set, wal::Wal, ConsensusSupport,
+    collection::*, error::ConsensusError, types::*, util::into_addr_set, wal::Wal,
+    ConsensusSupport, Content,
 };
 use bft_core::types as bft;
 use bft_core::types::{
@@ -31,13 +32,11 @@ const LOG_TYPE_COMMIT: u8 = 8;
 
 ///
 #[derive(Clone, Debug)]
-pub struct ConsensusExecutor<
-    F: Encodable + Decodable + Clone + Send + 'static + Sync + Serialize + DeserializeOwned,
->(Sender<ConsensusInput<F>>);
+pub struct ConsensusExecutor<F: Content + Sync>(Sender<ConsensusInput<F>>);
 
 impl<F> ConsensusExecutor<F>
 where
-    F: Encodable + Decodable + Clone + Send + 'static + Sync + Serialize + DeserializeOwned,
+    F: Content + Sync,
 {
     ///
     pub fn new<T: ConsensusSupport<F> + Send + 'static + Clone + Sync>(
@@ -57,10 +56,7 @@ where
 }
 
 ///
-pub struct Consensus<
-    T: ConsensusSupport<F> + Send + 'static + Sync + Clone,
-    F: Encodable + Decodable + Clone + Send + 'static + Sync + Serialize + DeserializeOwned,
-> {
+pub struct Consensus<T: ConsensusSupport<F> + Send + 'static + Sync + Clone, F: Content + Sync> {
     bft_recv: Receiver<BftMsg>,
     interface_recv: Receiver<ConsensusInput<F>>,
     async_send: Sender<AsyncMsg<F>>,
@@ -86,7 +82,7 @@ pub struct Consensus<
 impl<T, F> Consensus<T, F>
 where
     T: ConsensusSupport<F> + Send + 'static + Sync + Clone,
-    F: Encodable + Decodable + Clone + Send + 'static + Sync + Serialize + DeserializeOwned,
+    F: Content + Sync,
 {
     ///
     fn new(
