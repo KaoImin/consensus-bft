@@ -1,72 +1,58 @@
 use consensus_bft::{
     types::{Address, Commit, ConsensusOutput},
-    ConsensusSupport,
+    ConsensusSupport, Content,
 };
-use crossbeam_channel::{unbounded, Receiver, Sender};
-use rand::random;
-use rlp::{Decodable, DecoderError, Encodable, Rlp, RlpStream};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use crossbeam_channel::{Receiver, Sender};
 
 #[derive(Clone, Debug)]
-pub enum Error {
+pub(crate) enum Error {
     SupportError,
 }
 
 #[derive(Clone, Debug)]
-pub struct Support<Content> {
-    commit: Sender<Commit<Content>>,
+pub(crate) struct Support<F: Content + Sync> {
     address: Vec<u8>,
+    send: Sender<u64>,
+    recv: Receiver<F>,
 }
 
-pub struct Content(Vec<u8>);
-
-impl Content {
-    pub(crate) fn new(size: usize) -> Self {
-        let mb = (0..1024 * 1024 * size)
-            .map(|_| random::<u8>())
-            .collect::<Vec<_>>();
-        Content(mb)
-    }
-}
-
-impl Encodable for Content {
-    fn rlp_append(&self, s: &mut RlpStream) {
-        s.append_list(&self.0);
-    }
-}
-
-impl Decodable for Content {
-    fn decode(rlp: &Rlp) -> Result<Self, DecoderError> {
-        let res = rlp
-            .as_list::<u8>()
-            .map_err(|_| DecoderError::RlpExpectedToBeList)?;
-        Ok(Content(res))
-    }
-}
-
-impl<F> ConsensusSupport<F> for Support<Content>
+impl<F> Support<F>
 where
-    F: Encodable + Decodable + Clone + Send + 'static + Serialize + DeserializeOwned,
+    F: Content + Sync,
+{
+    pub(crate) fn new(address: Vec<u8>, send: Sender<u64>, recv: Receiver<F>) -> Self {
+        Support {
+            address,
+            send,
+            recv,
+        }
+    }
+}
+
+impl<F> ConsensusSupport<F> for Support<F>
+where
+    F: Content + Sync,
 {
     type Error = Error;
 
-    fn transmit(&self, msg: ConsensusOutput<Content>) -> Result<(), Self::Error> {
+    fn transmit(&self, _msg: ConsensusOutput<F>) -> Result<(), Self::Error> {
         Ok(())
     }
 
-    fn check_block(&self, block: Content, height: u64) -> Result<(), Self::Error> {
+    fn check_block(&self, _block: F, _height: u64) -> Result<(), Self::Error> {
         Ok(())
     }
 
-    fn commit(&self, commit: Commit<Content>) -> Result<(), Self::Error> {
+    fn commit(&self, commit: Commit<F>) -> Result<(), Self::Error> {
+        self.send.send(commit.height).unwrap();
         Ok(())
     }
 
-    fn sign(&self, hash: &[u8]) -> Result<Vec<u8>, Self::Error> {
+    fn sign(&self, _hash: &[u8]) -> Result<Vec<u8>, Self::Error> {
         Ok(self.address.clone())
     }
 
-    fn check_signature(&self, signature: &[u8], hash: &[u8]) -> Result<Address, Self::Error> {
+    fn check_signature(&self, _signature: &[u8], _hash: &[u8]) -> Result<Address, Self::Error> {
         Ok(self.address.clone())
     }
 
@@ -74,7 +60,7 @@ where
         msg.to_vec()
     }
 
-    fn get_block(&self, height: u64) -> Result<Content, Self::Error> {
-        Ok(Content::new(1))
+    fn get_block(&self, _height: u64) -> Result<F, Self::Error> {
+        self.recv.recv().map_err(|_| Error::SupportError)
     }
 }
