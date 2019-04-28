@@ -4,8 +4,6 @@ use crate::{
 };
 use bft_core::types::Vote as BftVote;
 use lru_cache::LruCache;
-use rlp::{Decodable, Encodable};
-use serde::{de::DeserializeOwned, Serialize};
 use std::collections::HashMap;
 
 pub(crate) const CACHE_NUMBER: usize = 16;

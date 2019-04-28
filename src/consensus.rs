@@ -11,8 +11,7 @@ use bft_core::Core as BFT;
 use crossbeam_channel::{select, unbounded, Receiver, Sender};
 use crossbeam_utils::thread as crossbeam_thread;
 use log::{error, info, warn};
-use rlp::{Decodable, Encodable};
-use serde::{de::DeserializeOwned, Serialize};
+use rlp::Encodable;
 use serde_json::{from_slice, to_string};
 use std::collections::{HashMap, HashSet};
 use std::thread;
@@ -66,6 +65,7 @@ pub struct Consensus<T: ConsensusSupport<F> + Send + 'static + Sync + Clone, F: 
     bft: BFT,
     block: Option<Vec<u8>>,
     verified_block: HashMap<Hash, bool>,
+    address: Vec<u8>,
     authority: AuthorityManage,
     votes: VoteCollector,
     proposals: ProposalCollector<F>,
@@ -75,6 +75,7 @@ pub struct Consensus<T: ConsensusSupport<F> + Send + 'static + Sync + Clone, F: 
     block_cache: HashMap<Hash, F>,
     proposal_cache: HashMap<u64, Vec<SignedProposal<F>>>,
     vote_cache: HashMap<u64, Vec<SignedVote>>,
+    consensus_power: bool,
 
     function: T,
 }
@@ -91,7 +92,7 @@ where
         recv: Receiver<ConsensusInput<F>>,
         wal_path: String,
     ) -> Self {
-        let (core, r) = BFT::start(address);
+        let (core, r) = BFT::start(address.clone());
         let (async_send, async_recv) = unbounded();
         Consensus {
             bft_recv: r,
@@ -103,6 +104,7 @@ where
             bft: core,
             block: None,
             verified_block: HashMap::new(),
+            address,
             authority: AuthorityManage::default(),
             votes: VoteCollector::new(),
             proposals: ProposalCollector::new(),
@@ -112,6 +114,7 @@ where
             block_cache: HashMap::new(),
             proposal_cache: HashMap::new(),
             vote_cache: HashMap::new(),
+            consensus_power: false,
 
             function: support,
         }
@@ -220,7 +223,19 @@ where
             }
             ConsensusInput::Status(rs) => {
                 info!("Receive status");
-                let status = self.handle_rich_status(rs, true)?;
+                let status = self.handle_rich_status(rs.clone(), true)?;
+
+                if into_addr_set(rs.authority_list).contains(&self.address) {
+                    self.consensus_power = true;
+                    self.bft
+                        .to_bft_core(BftMsg::Start)
+                        .map_err(|_| ConsensusError::SendMsgErr)?;
+                } else {
+                    self.consensus_power = false;
+                    self.bft
+                        .to_bft_core(BftMsg::Pause)
+                        .map_err(|_| ConsensusError::SendMsgErr)?;
+                }
                 self.bft
                     .send_status(BftMsg::Status(status))
                     .map_err(|_| ConsensusError::SendMsgErr)?;
@@ -717,7 +732,7 @@ where
         let prev_hash = rich_status.prev_hash.clone();
         self.prev_hash = Some(prev_hash);
         self.authority
-            .update_authority(self.height, rich_status.clone().authority_list);
+            .update_authority(self.height, rich_status.authority_list.clone());
 
         self.goto_new_height(height)?;
         Ok(rich_status.to_bft_status())
