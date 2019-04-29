@@ -2,21 +2,11 @@ extern crate consensus_bft as BFT;
 #[macro_use]
 extern crate criterion;
 
-use crate::types::*;
+use blake2b_simd::Params;
 use criterion::{Benchmark, Criterion};
 use crossbeam_channel::unbounded;
 use rand::random;
-use std::collections::HashMap;
-use BFT::*;
-
-#[inline(always)]
-fn bench_proof() -> Vec<u8> {
-    let mut hash = Vec::new();
-    for _i in 0..256 {
-        hash.push(1);
-    }
-    hash
-}
+// use sha3::{Digest, Sha3_256};
 
 #[inline(always)]
 fn gen_mb(size: usize) -> Vec<u8> {
@@ -24,60 +14,112 @@ fn gen_mb(size: usize) -> Vec<u8> {
     mb
 }
 
-fn bench_to_proposal(content: Vec<u8>) {
-    let (s, r) = unbounded();
-    let proof = Proof {
-        block_hash: bench_proof(),
-        height: 0,
-        round: 0,
-        precommit_votes: HashMap::new(),
-    };
+// fn sha3(msg: Vec<u8>) {
+//     let mut hasher = Sha3_256::new();
+//     hasher.input(msg);
+//     let _ = hasher.result();
+// }
 
-    let proposal = Proposal {
-        height: 0,
-        round: 0,
-        content,
-        proof,
-        lock_round: None,
-        lock_votes: Vec::new(),
-        proposer: vec![3],
-    };
-    let res = proposal.to_bft_proposal(vec![4]);
-    s.send(res).unwrap();
+// fn blake2b(msg: Vec<u8>) {
+//     let _ = Params::new()
+//         .hash_length(32)
+//         .to_state()
+//         .update(&msg)
+//         .finalize();
+// }
+
+fn convert_proposal(content: Vec<u8>) {
+    let (s, r) = unbounded();
+    let mut short = Vec::new();
+    for i in 0..60 {
+        short.push(content[i].clone());
+    }
+
+    let hash = Params::new()
+        .hash_length(32)
+        .to_state()
+        .update(&short)
+        .finalize()
+        .as_bytes()
+        .to_owned();
+    s.send(hash.clone()).unwrap();
+    r.recv().unwrap();
+    s.send(hash).unwrap();
     r.recv().unwrap();
 }
 
-fn bench_proposal(content: Vec<u8>) {
+fn no_convert_proposal(content: Vec<u8>) {
     let (s, r) = unbounded();
-    let res = SignedProposal {
-        signature: vec![1, 1, 1],
-        proposal: Proposal {
-            height: 0,
-            round: 0,
-            content,
-            proof: Proof {
-                block_hash: bench_proof(),
-                height: 0,
-                round: 0,
-                precommit_votes: HashMap::new(),
-            },
-            lock_round: None,
-            lock_votes: Vec::new(),
-            proposer: vec![3],
-        },
-    };
-
-    s.send(res).unwrap();
+    s.send(content.clone()).unwrap();
+    r.recv().unwrap();
+    s.send(content).unwrap();
     r.recv().unwrap();
 }
 
-fn criterion_benchmark(c: &mut Criterion) {
-    let mb = gen_mb(3);
+fn benchmark_1(c: &mut Criterion) {
+    let msg = gen_mb(2);
     c.bench(
         "consensus",
-        Benchmark::new("bench", move |b| b.iter(|| bench_proposal(mb.clone()))),
+        Benchmark::new("bench_1", move |b| b.iter(|| convert_proposal(msg.clone()))),
     );
 }
 
-criterion_group!(benches, criterion_benchmark);
+fn benchmark_2(c: &mut Criterion) {
+    let msg = gen_mb(2);
+    c.bench(
+        "consensus",
+        Benchmark::new("bench_2", move |b| {
+            b.iter(|| no_convert_proposal(msg.clone()))
+        }),
+    );
+}
+
+criterion_group!(benches, benchmark_1, benchmark_2);
 criterion_main!(benches);
+
+// fn bench_to_proposal(content: Vec<u8>) {
+//     let (s, r) = unbounded();
+//     let proof = Proof {
+//         block_hash: bench_proof(),
+//         height: 0,
+//         round: 0,
+//         precommit_votes: HashMap::new(),
+//     };
+
+//     let proposal = Proposal {
+//         height: 0,
+//         round: 0,
+//         content,
+//         proof,
+//         lock_round: None,
+//         lock_votes: Vec::new(),
+//         proposer: vec![3],
+//     };
+//     let res = proposal.to_bft_proposal(vec![4]);
+//     s.send(res).unwrap();
+//     r.recv().unwrap();
+// }
+
+// fn bench_proposal(content: Vec<u8>) {
+//     let (s, r) = unbounded();
+//     let res = SignedProposal {
+//         signature: vec![1, 1, 1],
+//         proposal: Proposal {
+//             height: 0,
+//             round: 0,
+//             content,
+//             proof: Proof {
+//                 block_hash: bench_proof(),
+//                 height: 0,
+//                 round: 0,
+//                 precommit_votes: HashMap::new(),
+//             },
+//             lock_round: None,
+//             lock_votes: Vec::new(),
+//             proposer: vec![3],
+//         },
+//     };
+
+//     s.send(res).unwrap();
+//     r.recv().unwrap();
+// }
