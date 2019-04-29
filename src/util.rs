@@ -11,6 +11,7 @@ pub fn check_proof<
     authority: Vec<Node>,
     crypt_hash: impl Fn(&[u8]) -> Vec<u8>,
     check_signature: impl Fn(&[u8], &[u8]) -> Option<Address>,
+    is_turbo: bool,
 ) -> bool {
     if height == 0 {
         return true;
@@ -21,13 +22,19 @@ pub fn check_proof<
         return false;
     }
 
+    let proposal = if is_turbo {
+       crypt_hash(&turbo_hash(proof.block_hash.rlp_bytes()))
+    } else {
+        crypt_hash(&proof.block_hash.rlp_bytes())
+    };
+
     for (sender, sig) in proof.precommit_votes.into_iter() {
         if authority.contains(&sender) {
             let msg = Vote {
                 vote_type: VoteType::Precommit,
                 height: proof.height,
                 round: proof.round,
-                proposal: crypt_hash(&proof.block_hash.rlp_bytes()),
+                proposal: proposal.clone(),
                 voter: sender.clone(),
             };
             let hash = crypt_hash(&msg.rlp_bytes());

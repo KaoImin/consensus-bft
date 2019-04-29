@@ -984,11 +984,18 @@ where
 
         for (sender, sig) in proof.precommit_votes.clone().into_iter() {
             if authority.contains(&sender) {
+                let proposal = if cfg!(feature = "turbo_hash") {
+                    self.function
+                        .hash(&turbo_hash(proof.block_hash.rlp_bytes()))
+                } else {
+                    self.function.hash(&proof.block_hash.rlp_bytes())
+                };
+
                 let msg = Vote {
                     vote_type: VoteType::Precommit,
                     height: proof.height,
                     round: proof.round,
-                    proposal: self.function.hash(&proof.block_hash.rlp_bytes()),
+                    proposal,
                     voter: sender.clone(),
                 };
                 let hash = self.function.hash(&msg.rlp_bytes());
