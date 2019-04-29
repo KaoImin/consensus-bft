@@ -22,7 +22,7 @@ use std::{
     thread,
 };
 
-///
+/// Consensus result.
 pub type Result<T> = ::std::result::Result<T, ConsensusError>;
 
 pub(crate) const INIT_HEIGHT: u64 = 0;
@@ -35,7 +35,7 @@ const LOG_TYPE_PROPOSAL: u8 = 6;
 const LOG_TYPE_VOTE: u8 = 7;
 const LOG_TYPE_COMMIT: u8 = 8;
 
-///
+/// A consensus executor.
 #[derive(Clone, Debug)]
 pub struct ConsensusExecutor<F: Content + Sync>(Sender<ConsensusInput<F>>);
 
@@ -43,7 +43,7 @@ impl<F> ConsensusExecutor<F>
 where
     F: Content + Sync,
 {
-    ///
+    /// A function to generate a new consensus executor.
     pub fn new<T: ConsensusSupport<F> + Send + 'static + Clone + Sync>(
         support: T,
         address: Address,
@@ -54,14 +54,14 @@ where
         ConsensusExecutor(send)
     }
 
-    ///
+    /// A functiont to send a `ConsensusInput`.
     pub fn send(&self, input: ConsensusInput<F>) -> Result<()> {
         self.0.send(input).map_err(|_| ConsensusError::SendMsgErr)
     }
 }
 
-///
-pub struct Consensus<T: ConsensusSupport<F> + Send + 'static + Sync + Clone, F: Content + Sync> {
+/// A consensus type.
+pub(crate) struct Consensus<T: ConsensusSupport<F> + Send + 'static + Sync + Clone, F: Content + Sync> {
     bft_recv: Receiver<BftMsg>,
     interface_recv: Receiver<ConsensusInput<F>>,
     async_send: Sender<AsyncMsg<F>>,
@@ -91,7 +91,6 @@ where
     T: ConsensusSupport<F> + Send + 'static + Sync + Clone,
     F: Content + Sync,
 {
-    ///
     fn new(
         support: T,
         address: Address,
@@ -126,8 +125,8 @@ where
         }
     }
 
-    ///
-    pub fn start(
+    /// A function to start a consensus service.
+    pub(crate) fn start(
         support: T,
         address: Address,
         recv: Receiver<ConsensusInput<F>>,

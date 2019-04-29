@@ -37,7 +37,7 @@ pub trait Content:
 }
 
 ///
-pub mod collection;
+pub(crate) mod collection;
 ///
 pub mod consensus;
 ///
@@ -47,4 +47,4 @@ pub mod types;
 ///
 pub mod util;
 ///
-pub mod wal;
+pub(crate) mod wal;

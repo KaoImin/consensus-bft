@@ -58,7 +58,7 @@ impl Into<u8> for VoteType {
     }
 }
 
-/// Signed proposal type.
+/// A signed proposal.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct SignedProposal<F: Content + Sync> {
     /// A proposal.
@@ -68,7 +68,7 @@ pub struct SignedProposal<F: Content + Sync> {
     pub signature: Vec<u8>,
 }
 
-/// Proposal type.
+/// A Proposal.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct Proposal<F: Content + Sync> {
     /// The height of a proposal.
@@ -131,7 +131,7 @@ where
     }
 }
 
-/// Signed vote type.
+/// A signed vote.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct SignedVote {
     /// A vote.
@@ -146,7 +146,7 @@ impl Encodable for SignedVote {
     }
 }
 
-/// Vote type.
+/// A vote.
 #[derive(Serialize, Deserialize, Clone, Debug, Eq, PartialEq)]
 pub struct Vote {
     /// The vote type of a vote.
@@ -202,7 +202,7 @@ impl Vote {
     }
 }
 
-/// Commit type.
+/// A commit.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct Commit<F: Encodable + Decodable + Clone + Send + 'static + Serialize + DeserializeOwned>
 {
@@ -220,7 +220,7 @@ pub struct Commit<F: Encodable + Decodable + Clone + Send + 'static + Serialize 
     pub address: Address,
 }
 
-/// Rich status type.
+/// A rich status.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct Status {
     /// The height of a status.
@@ -248,7 +248,7 @@ impl Status {
     }
 }
 
-/// Feed type.
+/// A feed.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct Feed<F: Encodable + Decodable + Clone + Send + 'static + Serialize + DeserializeOwned> {
     /// The height of the proposal.
@@ -277,7 +277,7 @@ impl VerifyResp {
     }
 }
 
-/// The authority manage type.
+/// An authority manage.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct AuthorityManage {
     /// The authority list at present.
@@ -308,7 +308,7 @@ impl AuthorityManage {
     }
 }
 
-/// Node type.
+/// A node.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct Node {
     /// The address of a node.
@@ -335,7 +335,7 @@ impl Node {
     }
 }
 
-/// Proof type.
+/// A proof.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct Proof<F: Encodable + Decodable + Clone + Send + 'static + Serialize + DeserializeOwned> {
     /// The hash of a proof.
