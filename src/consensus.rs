@@ -235,14 +235,13 @@ where
                             .to_bft_core(BftMsg::Start)
                             .map_err(|_| ConsensusError::SendMsgErr)?;
                     }
-                } else {
-                    if self.consensus_power {
-                        self.consensus_power = false;
-                        self.bft
-                            .to_bft_core(BftMsg::Pause)
-                            .map_err(|_| ConsensusError::SendMsgErr)?;
-                    }
+                } else if self.consensus_power {
+                    self.consensus_power = false;
+                    self.bft
+                        .to_bft_core(BftMsg::Pause)
+                        .map_err(|_| ConsensusError::SendMsgErr)?;
                 }
+
                 self.bft
                     .send_status(BftMsg::Status(status))
                     .map_err(|_| ConsensusError::SendMsgErr)?;
