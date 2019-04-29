@@ -39,7 +39,7 @@ where
         Ok(())
     }
 
-    fn check_block(&self, _block: F, _height: u64) -> Result<(), Self::Error> {
+    fn check_proposal(&self, _block: F, _height: u64) -> Result<(), Self::Error> {
         Ok(())
     }
 
@@ -52,7 +52,7 @@ where
         Ok(self.address.clone())
     }
 
-    fn check_signature(&self, _signature: &[u8], _hash: &[u8]) -> Result<Address, Self::Error> {
+    fn verify_signature(&self, _signature: &[u8], _hash: &[u8]) -> Result<Address, Self::Error> {
         Ok(self.address.clone())
     }
 
@@ -60,7 +60,7 @@ where
         msg.to_vec()
     }
 
-    fn get_block(&self, _height: u64) -> Result<F, Self::Error> {
+    fn get_content(&self, _height: u64) -> Result<F, Self::Error> {
         self.recv.recv().map_err(|_| Error::SupportError)
     }
 }
