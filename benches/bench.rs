@@ -1,9 +1,5 @@
-extern crate consensus_bft as BFT;
-#[macro_use]
-extern crate criterion;
-
 use blake2b_simd::Params;
-use criterion::{Benchmark, Criterion};
+use criterion::{criterion_group, criterion_main, Benchmark, Criterion};
 use crossbeam_channel::unbounded;
 use rand::random;
 use std::collections::HashMap;
