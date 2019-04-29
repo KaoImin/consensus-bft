@@ -14,25 +14,14 @@ fn gen_mb(size: usize) -> Vec<u8> {
     mb
 }
 
-// fn sha3(msg: Vec<u8>) {
-//     let mut hasher = Sha3_256::new();
-//     hasher.input(msg);
-//     let _ = hasher.result();
-// }
-
-// fn blake2b(msg: Vec<u8>) {
-//     let _ = Params::new()
-//         .hash_length(32)
-//         .to_state()
-//         .update(&msg)
-//         .finalize();
-// }
-
 fn convert_proposal(content: Vec<u8>) {
     let (s, r) = unbounded();
     let mut short = Vec::new();
-    for i in 0..60 {
-        short.push(content[i].clone());
+    if content.len() > 100 {
+        let a = (content.len() as f64 / 100 as f64).round() as usize;
+        for i in 0..100 {
+            short.push(content[a * i]);
+        }
     }
 
     let hash = Params::new()
@@ -60,7 +49,9 @@ fn benchmark_1(c: &mut Criterion) {
     let msg = gen_mb(2);
     c.bench(
         "consensus",
-        Benchmark::new("bench_1", move |b| b.iter(|| convert_proposal(msg.clone()))),
+        Benchmark::new("bench_convert", move |b| {
+            b.iter(|| convert_proposal(msg.clone()))
+        }),
     );
 }
 
@@ -68,7 +59,7 @@ fn benchmark_2(c: &mut Criterion) {
     let msg = gen_mb(2);
     c.bench(
         "consensus",
-        Benchmark::new("bench_2", move |b| {
+        Benchmark::new("bench_no_convert", move |b| {
             b.iter(|| no_convert_proposal(msg.clone()))
         }),
     );
