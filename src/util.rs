@@ -23,7 +23,7 @@ pub fn check_proof<
     }
 
     let proposal = if is_turbo {
-       crypt_hash(&turbo_hash(proof.block_hash.rlp_bytes()))
+        crypt_hash(&turbo_hash(proof.block_hash.rlp_bytes()))
     } else {
         crypt_hash(&proof.block_hash.rlp_bytes())
     };
