@@ -10,7 +10,7 @@ pub fn check_proof<
     height: u64,
     authority: Vec<Node>,
     crypt_hash: impl Fn(&[u8]) -> Vec<u8>,
-    check_signature: impl Fn(&[u8], &[u8]) -> Option<Address>,
+    verify_signature: impl Fn(&[u8], &[u8]) -> Option<Address>,
     is_turbo: bool,
 ) -> bool {
     if height == 0 {
@@ -39,7 +39,7 @@ pub fn check_proof<
             };
             let hash = crypt_hash(&msg.rlp_bytes());
 
-            if Some(sender) != check_signature(&sig, &hash) {
+            if Some(sender) != verify_signature(&sig, &hash) {
                 return false;
             }
         } else {

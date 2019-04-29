@@ -61,7 +61,10 @@ where
 }
 
 /// A consensus type.
-pub(crate) struct Consensus<T: ConsensusSupport<F> + Send + 'static + Sync + Clone, F: Content + Sync> {
+pub(crate) struct Consensus<
+    T: ConsensusSupport<F> + Send + 'static + Sync + Clone,
+    F: Content + Sync,
+> {
     bft_recv: Receiver<BftMsg>,
     interface_recv: Receiver<ConsensusInput<F>>,
     async_send: Sender<AsyncMsg<F>>,
@@ -525,7 +528,7 @@ where
 
         crossbeam_thread::scope(|s| {
             s.spawn(|_| {
-                if let Ok(proposal) = func.get_block(height) {
+                if let Ok(proposal) = func.get_content(height) {
                     sender
                         .send(AsyncMsg::Feed(Feed {
                             content: proposal,
@@ -545,7 +548,7 @@ where
 
         crossbeam_thread::scope(|s| {
             s.spawn(|_| {
-                let is_pass = func.check_block(proposal.clone(), height).is_ok();
+                let is_pass = func.check_proposal(proposal.clone(), height).is_ok();
                 info!("Receive verify result {:?} at height {:?}", is_pass, height);
 
                 let hash = if cfg!(feature = "turbo_hash") {
@@ -606,7 +609,7 @@ where
         let hash = self.function.hash(&proposal.rlp_bytes());
         let address = self
             .function
-            .check_signature(&sig, &hash)
+            .verify_signature(&sig, &hash)
             .map_err(|_| ConsensusError::SupportErr)?;
 
         let height = proposal.height;
@@ -702,7 +705,7 @@ where
         let hash = self.function.hash(&msg.rlp_bytes());
         let address = self
             .function
-            .check_signature(&sig, &hash)
+            .verify_signature(&sig, &hash)
             .map_err(|_| ConsensusError::SupportErr)?;
 
         let height = vote.height;
@@ -896,7 +899,7 @@ where
         let sig = signed_vote.signature.clone();
         let hash = self.function.hash(&vote.rlp_bytes());
 
-        let address = self.function.check_signature(&sig, &hash);
+        let address = self.function.verify_signature(&sig, &hash);
         if address.is_err() {
             return Err(ConsensusError::SupportErr);
         }
@@ -999,7 +1002,7 @@ where
                 };
                 let hash = self.function.hash(&msg.rlp_bytes());
 
-                if let Ok(address) = self.function.check_signature(&sig, &hash) {
+                if let Ok(address) = self.function.verify_signature(&sig, &hash) {
                     if address != sender {
                         return false;
                     }
