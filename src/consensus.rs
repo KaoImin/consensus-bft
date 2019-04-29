@@ -1,5 +1,9 @@
 use crate::{
-    collection::*, error::ConsensusError, types::*, util::into_addr_set, wal::Wal,
+    collection::*,
+    error::ConsensusError,
+    types::*,
+    util::{into_addr_set, turbo_hash},
+    wal::Wal,
     ConsensusSupport, Content,
 };
 use bft_core::types as bft;
@@ -174,7 +178,12 @@ where
                 }
             }
             AsyncMsg::Feed(f) => {
-                let hash = self.function.hash(&f.content.rlp_bytes());
+                let hash = if cfg!(feature = "turbo_hash") {
+                    self.function.hash(&turbo_hash(f.content.rlp_bytes()))
+                } else {
+                    self.function.hash(&f.content.rlp_bytes())
+                };
+                
                 self.bft
                     .to_bft_core(BftMsg::Feed(BftFeed {
                         height: f.height,
@@ -610,7 +619,13 @@ where
             return Err(ConsensusError::ObsoleteMsg);
         }
         let content = proposal.content.clone();
-        let hash = self.function.hash(&content.rlp_bytes());
+
+        let hash = if cfg!(feature = "turbo_hash") {
+            self.function.hash(&turbo_hash(content.rlp_bytes()))
+        } else {
+            self.function.hash(&content.rlp_bytes())
+        };
+
         self.block_cache
             .entry(hash.clone())
             .or_insert_with(|| content.clone());

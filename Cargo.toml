@@ -24,6 +24,7 @@ sha3 = "0.8"
 
 [features]
 default = ["async_verify"]
+turbo_hash = ["async_verify"]
 async_verify = ["bft-core/async_verify"]
 
 [[bench]]

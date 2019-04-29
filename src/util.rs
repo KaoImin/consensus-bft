@@ -49,3 +49,12 @@ pub(crate) fn into_addr_set(node_set: Vec<Node>) -> Vec<Address> {
     }
     set
 }
+
+pub(crate) fn turbo_hash(msg: Vec<u8>) -> Vec<u8> {
+    let mut res = Vec::new();
+    let length = (msg.len() as f64 / 100.0).round() as usize;
+    for i in 0..100 {
+        res.push(msg[i * length]);
+    }
+    res
+}
