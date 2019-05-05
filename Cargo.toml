@@ -6,7 +6,7 @@ edition = "2018"
 license = "MIT"
 
 [dependencies]
-bft-core = { git = "https://github.com/KaoImin/bft-core.git", branch = "develop" }
+bft-core = "0.1"
 crossbeam-channel = "0.3"
 crossbeam-utils = "0.6"
 log = "0.4.3"
