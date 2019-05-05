@@ -1,8 +1,10 @@
 use crate::types::*;
+use bft_core::{types::CoreOutput, FromCore};
+use crossbeam_channel::Sender;
 use rlp::{Decodable, Encodable};
 use serde::{de::DeserializeOwned, Serialize};
 
-///
+/// An independent function to check proof.
 pub fn check_proof<
     F: Encodable + Decodable + Encodable + Clone + Send + 'static + Serialize + DeserializeOwned,
 >(
@@ -64,4 +66,27 @@ pub(crate) fn turbo_hash(msg: Vec<u8>) -> Vec<u8> {
         res.push(msg[i * length]);
     }
     res
+}
+
+#[derive(Debug)]
+pub(crate) enum Error {
+    SendMsgErr,
+}
+
+#[derive(Debug, Clone)]
+pub(crate) struct SendMsg(Sender<CoreOutput>);
+
+impl FromCore for SendMsg {
+    type error = Error;
+
+    fn send_msg(&self, msg: CoreOutput) -> Result<(), Error> {
+        self.0.send(msg).map_err(|_| Error::SendMsgErr)?;
+        Ok(())
+    }
+}
+
+impl SendMsg {
+    pub(crate) fn new(s: Sender<CoreOutput>) -> Self {
+        SendMsg(s)
+    }
 }

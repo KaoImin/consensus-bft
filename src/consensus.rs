@@ -2,14 +2,14 @@ use crate::{
     collection::*,
     error::ConsensusError,
     types::*,
-    util::{into_addr_set, turbo_hash},
+    util::{into_addr_set, turbo_hash, SendMsg},
     wal::Wal,
     ConsensusSupport, Content,
 };
 
 use bft_core::types::{
-    BftMsg, Commit as BftCommit, Feed as BftFeed, Proposal as BftProposal, Status as BftStatus,
-    VerifyResp as BftVerifyResp, Vote as BftVote, VoteType as BftVoteType,
+    Commit as BftCommit, CoreInput, CoreOutput, Feed as BftFeed, Proposal as BftProposal,
+    Status as BftStatus, VerifyResp as BftVerifyResp, Vote as BftVote, VoteType as BftVoteType,
 };
 use bft_core::Core as BFT;
 use crossbeam_channel::{select, unbounded, Receiver, Sender};
@@ -65,7 +65,7 @@ pub(crate) struct Consensus<
     T: ConsensusSupport<F> + Send + 'static + Sync + Clone,
     F: Content + Sync,
 > {
-    bft_recv: Receiver<BftMsg>,
+    bft_recv: Receiver<CoreOutput>,
     interface_recv: Receiver<ConsensusInput<F>>,
     async_send: Sender<AsyncMsg<F>>,
     async_recv: Receiver<AsyncMsg<F>>,
@@ -100,10 +100,11 @@ where
         recv: Receiver<ConsensusInput<F>>,
         wal_path: String,
     ) -> Self {
-        let (core, r) = BFT::start(address.clone());
+        let (send, bft_recv) = unbounded();
+        let core = BFT::new(SendMsg::new(send), address.clone());
         let (async_send, async_recv) = unbounded();
         Consensus {
-            bft_recv: r,
+            bft_recv,
             interface_recv: recv,
             async_send,
             async_recv,
@@ -160,7 +161,7 @@ where
             AsyncMsg::VerifyResp(vr) => {
                 let hash = vr.proposal.clone();
                 self.bft
-                    .to_bft_core(BftMsg::VerifyResp(BftVerifyResp {
+                    .send_bft_msg(CoreInput::VerifyResp(BftVerifyResp {
                         is_pass: vr.is_pass,
                         proposal: hash.clone(),
                     }))
@@ -187,7 +188,7 @@ where
                 };
 
                 self.bft
-                    .to_bft_core(BftMsg::Feed(BftFeed {
+                    .send_bft_msg(CoreInput::Feed(BftFeed {
                         height: f.height,
                         proposal: hash.clone(),
                     }))
@@ -218,11 +219,11 @@ where
                 info!("Receive signed proposal");
                 let (proposal, verify_resp) = self.handle_signed_proposal(sp, true)?;
                 self.bft
-                    .send_proposal(BftMsg::Proposal(proposal))
+                    .send_bft_msg(CoreInput::Proposal(proposal))
                     .map_err(|_| ConsensusError::SendMsgErr)?;
                 if let Some(res) = verify_resp {
                     self.bft
-                        .send_verify(BftMsg::VerifyResp(res.to_bft_resp()))
+                        .send_bft_msg(CoreInput::VerifyResp(res.to_bft_resp()))
                         .map_err(|_| ConsensusError::SendMsgErr)?;
                 }
                 Ok(())
@@ -231,7 +232,7 @@ where
                 info!("Receive signed vote");
                 let vote = self.handle_signed_vote(sv, true)?;
                 self.bft
-                    .send_vote(BftMsg::Vote(vote))
+                    .send_bft_msg(CoreInput::Vote(vote))
                     .map_err(|_| ConsensusError::SendMsgErr)?;
                 Ok(())
             }
@@ -243,18 +244,18 @@ where
                     if !self.consensus_power {
                         self.consensus_power = true;
                         self.bft
-                            .to_bft_core(BftMsg::Start)
+                            .send_bft_msg(CoreInput::Start)
                             .map_err(|_| ConsensusError::SendMsgErr)?;
                     }
                 } else if self.consensus_power {
                     self.consensus_power = false;
                     self.bft
-                        .to_bft_core(BftMsg::Pause)
+                        .send_bft_msg(CoreInput::Pause)
                         .map_err(|_| ConsensusError::SendMsgErr)?;
                 }
 
                 self.bft
-                    .send_status(BftMsg::Status(status))
+                    .send_bft_msg(CoreInput::Status(status))
                     .map_err(|_| ConsensusError::SendMsgErr)?;
                 self.send_cache_proposal(self.height)?;
                 self.send_cache_vote(self.height)?;
@@ -263,35 +264,34 @@ where
         }
     }
 
-    fn core_process(&mut self, msg: BftMsg) -> Result<()> {
+    fn core_process(&mut self, msg: CoreOutput) -> Result<()> {
         match msg {
-            BftMsg::Proposal(p) => {
+            CoreOutput::Proposal(p) => {
                 info!("Receive proposal");
                 let sp = self.handle_proposal(p, true)?;
                 self.function
                     .transmit(ConsensusOutput::SignedProposal(sp))
                     .map_err(|_| ConsensusError::SupportErr)
             }
-            BftMsg::Vote(v) => {
+            CoreOutput::Vote(v) => {
                 info!("Receive vote");
                 let sv = self.handle_vote(v, true)?;
                 self.function
                     .transmit(ConsensusOutput::SignedVote(sv))
                     .map_err(|_| ConsensusError::SupportErr)
             }
-            BftMsg::Commit(c) => {
+            CoreOutput::Commit(c) => {
                 info!("Receive commit");
                 let commit = self.handle_commit(c, true)?;
                 self.function
                     .commit(commit)
                     .map_err(|_| ConsensusError::SupportErr)
             }
-            BftMsg::GetProposalRequest(h) => {
+            CoreOutput::GetProposalRequest(h) => {
                 info!("Receive get proposal request");
                 self.ask_for_proposal(h);
                 Ok(())
             }
-            _ => panic!("BFT Core Error!"),
         }
     }
 
@@ -307,11 +307,11 @@ where
                 proposal
             );
             self.bft
-                .send_proposal(BftMsg::Proposal(proposal))
+                .send_bft_msg(CoreInput::Proposal(proposal))
                 .map_err(|_| ConsensusError::SendMsgErr)?;
             if let Some(result) = resp {
                 self.bft
-                    .send_verify(BftMsg::VerifyResp(result.to_bft_resp()))
+                    .send_bft_msg(CoreInput::VerifyResp(result.to_bft_resp()))
                     .map_err(|_| ConsensusError::SendMsgErr)?;
             }
         }
@@ -326,7 +326,7 @@ where
         for signed_vote in votes.unwrap().1.into_iter() {
             let vote = self.handle_signed_vote(signed_vote, true)?;
             self.bft
-                .send_vote(BftMsg::Vote(vote))
+                .send_bft_msg(CoreInput::Vote(vote))
                 .map_err(|_| ConsensusError::SendMsgErr)?;
         }
         Ok(())
@@ -1027,12 +1027,12 @@ where
                     if let Ok((proposal, verify_resp)) = self.handle_signed_proposal(msg, false) {
                         info!("Consensus hands over bft_proposal to bft-rs");
                         self.bft
-                            .send_proposal(BftMsg::Proposal(proposal))
+                            .send_bft_msg(CoreInput::Proposal(proposal))
                             .expect("Consensus hands over bft_proposal failed!");
                         if let Some(verify_resp) = verify_resp {
                             info!("Consensus hands over verify_resp to bft-rs");
                             self.bft
-                                .send_verify(BftMsg::VerifyResp(verify_resp.to_bft_resp()))
+                                .send_bft_msg(CoreInput::VerifyResp(verify_resp.to_bft_resp()))
                                 .expect("Consensus hands over verify_resp failed!");
                         }
                     };
@@ -1043,7 +1043,7 @@ where
                     if let Ok(vote) = self.handle_signed_vote(msg, false) {
                         info!("Consensus hands over bft_vote to bft-rs");
                         self.bft
-                            .send_vote(BftMsg::Vote(vote))
+                            .send_bft_msg(CoreInput::Vote(vote))
                             .expect("Consensus hands over bft_vote failed!");
                     };
                 }
@@ -1053,7 +1053,7 @@ where
                     if let Ok(status) = self.handle_rich_status(msg, false) {
                         info!("Consensus hands over bft_status to bft-rs");
                         self.bft
-                            .send_status(BftMsg::Status(status))
+                            .send_bft_msg(CoreInput::Status(status))
                             .expect("Consensus hands over bft_status failed!");
                     };
                 }
@@ -1067,7 +1067,7 @@ where
                     };
 
                     self.bft
-                        .to_bft_core(BftMsg::Feed(BftFeed {
+                        .send_bft_msg(CoreInput::Feed(BftFeed {
                             height: msg.height,
                             proposal: hash.clone(),
                         }))
@@ -1086,7 +1086,7 @@ where
                     };
 
                     self.bft
-                        .to_bft_core(BftMsg::VerifyResp(BftVerifyResp {
+                        .send_bft_msg(CoreInput::VerifyResp(BftVerifyResp {
                             is_pass: msg.is_pass,
                             proposal: hash.clone(),
                         }))
