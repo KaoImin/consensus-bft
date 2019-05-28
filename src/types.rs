@@ -8,6 +8,8 @@ use std::collections::HashMap;
 pub type Address = Vec<u8>;
 /// Hash type.
 pub type Hash = Vec<u8>;
+/// Signature type.
+pub type Signature = Vec<u8>;
 
 /// Consensus input message types.
 #[derive(Debug, Clone)]
