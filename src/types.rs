@@ -1,7 +1,10 @@
 use crate::{consensus::INIT_HEIGHT, Content};
+
 use bft_core::types as bft;
-use rlp::{Decodable, Encodable, RlpStream};
+use log::error;
+use rlp::{Decodable, DecoderError, Encodable, Prototype, Rlp, RlpStream};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
+
 use std::collections::HashMap;
 
 /// Address type.
@@ -51,6 +54,16 @@ pub enum VoteType {
     Precommit,
 }
 
+impl From<u8> for VoteType {
+    fn from(s: u8) -> Self {
+        match s {
+            0 => VoteType::Prevote,
+            1 => VoteType::Precommit,
+            _ => panic!("Invalid vote type!"),
+        }
+    }
+}
+
 impl Into<u8> for VoteType {
     fn into(self) -> u8 {
         match self {
@@ -64,25 +77,58 @@ impl Into<u8> for VoteType {
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct SignedProposal<F: Content + Sync> {
     /// A proposal.
-    #[serde(bound(deserialize = "F: DeserializeOwned"))]
-    pub proposal: Proposal<F>,
+    pub proposal: Proposal,
     /// A signature of the proposal.
-    pub signature: Vec<u8>,
+    pub signature: Signature,
+    #[serde(bound(deserialize = "F: DeserializeOwned"))]
+    /// The block content.
+    pub content: F,
+}
+
+impl<F> Encodable for SignedProposal<F>
+where
+    F: Content + Sync,
+{
+    fn rlp_append(&self, s: &mut RlpStream) {
+        s.begin_list(3)
+            .append(&self.proposal)
+            .append(&self.signature)
+            .append(&self.content);
+    }
+}
+
+impl<F> Decodable for SignedProposal<F>
+where
+    F: Content + Sync,
+{
+    fn decode(r: &Rlp) -> Result<Self, DecoderError> {
+        match r.prototype()? {
+            Prototype::List(3) => {
+                let proposal: Proposal = r.val_at(0)?;
+                let signature: Signature = r.val_at(1)?;
+                let content: F = r.val_at(2)?;
+                Ok(SignedProposal {
+                    proposal,
+                    signature,
+                    content,
+                })
+            }
+            _ => Err(DecoderError::RlpInconsistentLengthAndData),
+        }
+    }
 }
 
 /// A Proposal.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-pub struct Proposal<F: Content + Sync> {
+pub struct Proposal {
     /// The height of a proposal.
     pub height: u64,
     /// The round of a proposal.
     pub round: u64,
     /// The content of a proposal.
-    #[serde(bound(deserialize = "F: DeserializeOwned"))]
-    pub content: F,
+    pub hash: Hash,
     /// The proof of a proposal.
-    #[serde(bound(deserialize = "F: DeserializeOwned"))]
-    pub proof: Proof<F>,
+    pub proof: Proof,
     /// The lock round of a proposal. If the proposal has not been locked, it should be `None`.
     pub lock_round: Option<u64>,
     /// The lock votes of a proposal. If the proposal has not been locked, it should be an empty `Vec`.
@@ -91,25 +137,46 @@ pub struct Proposal<F: Content + Sync> {
     pub proposer: Address,
 }
 
-impl<F> Encodable for Proposal<F>
-where
-    F: Content + Sync,
-{
+impl Encodable for Proposal {
     fn rlp_append(&self, s: &mut RlpStream) {
-        s.append(&self.height)
+        s.begin_list(7)
+            .append(&self.height)
             .append(&self.round)
-            .append(&self.content);
-        if let Some(lock_round) = self.lock_round {
-            s.append(&lock_round).append_list(&self.lock_votes);
-        }
-        s.append(&self.proposer);
+            .append(&self.hash)
+            .append(&self.proof)
+            .append(&self.lock_round)
+            .append_list(&self.lock_votes)
+            .append(&self.proposer);
     }
 }
 
-impl<F> Proposal<F>
-where
-    F: Content + Sync,
-{
+impl Decodable for Proposal {
+    fn decode(r: &Rlp) -> Result<Self, DecoderError> {
+        match r.prototype()? {
+            Prototype::List(7) => {
+                let height: u64 = r.val_at(0)?;
+                let round: u64 = r.val_at(1)?;
+                let hash: Hash = r.val_at(2)?;
+                let proof: Proof = r.val_at(3)?;
+                let lock_round: Option<u64> = r.val_at(4)?;
+                let lock_votes: Vec<SignedVote> = r.list_at(5)?;
+                let proposer: Address = r.val_at(6)?;
+                Ok(Proposal {
+                    height,
+                    round,
+                    hash,
+                    proof,
+                    lock_round,
+                    lock_votes,
+                    proposer,
+                })
+            }
+            _ => Err(DecoderError::RlpInconsistentLengthAndData),
+        }
+    }
+}
+
+impl Proposal {
     /// A function to convert a proposal into the corresponding type in BFT-core.
     pub(crate) fn to_bft_proposal(&self, hash: Vec<u8>) -> bft::Proposal {
         let lock_votes = if self.lock_round.is_some() {
@@ -139,12 +206,27 @@ pub struct SignedVote {
     /// A vote.
     pub vote: Vote,
     /// A signature of the vote.
-    pub signature: Vec<u8>,
+    pub signature: Signature,
 }
 
 impl Encodable for SignedVote {
     fn rlp_append(&self, s: &mut RlpStream) {
-        s.append(&self.vote).append_list(&self.signature);
+        s.begin_list(2)
+            .append(&self.vote)
+            .append_list(&self.signature);
+    }
+}
+
+impl Decodable for SignedVote {
+    fn decode(r: &Rlp) -> Result<Self, DecoderError> {
+        match r.prototype()? {
+            Prototype::List(2) => {
+                let vote: Vote = r.val_at(0)?;
+                let signature: Signature = r.val_at(1)?;
+                Ok(SignedVote { vote, signature })
+            }
+            _ => Err(DecoderError::RlpInconsistentLengthAndData),
+        }
     }
 }
 
@@ -166,11 +248,35 @@ pub struct Vote {
 impl Encodable for Vote {
     fn rlp_append(&self, s: &mut RlpStream) {
         let res: u8 = self.vote_type.clone().into();
-        s.append(&res)
+        s.begin_list(5)
+            .append(&res)
             .append(&self.height)
             .append(&self.round)
             .append(&self.proposal)
             .append(&self.voter);
+    }
+}
+
+impl Decodable for Vote {
+    fn decode(r: &Rlp) -> Result<Self, DecoderError> {
+        match r.prototype()? {
+            Prototype::List(5) => {
+                let vote_type: u8 = r.val_at(0)?;
+                let vote_type: VoteType = VoteType::from(vote_type);
+                let height: u64 = r.val_at(1)?;
+                let round: u64 = r.val_at(2)?;
+                let proposal: Hash = r.val_at(3)?;
+                let voter: Address = r.val_at(4)?;
+                Ok(Vote {
+                    vote_type,
+                    height,
+                    round,
+                    proposal,
+                    voter,
+                })
+            }
+            _ => Err(DecoderError::RlpInconsistentLengthAndData),
+        }
     }
 }
 
@@ -217,7 +323,7 @@ pub struct Commit<F: Encodable + Decodable + Clone + Send + 'static + Serialize 
     pub prev_hash: Hash,
     /// The proof of the commit.
     #[serde(bound(deserialize = "F: DeserializeOwned"))]
-    pub proof: Proof<F>,
+    pub proof: Proof,
     /// The address of the node.
     pub address: Address,
 }
@@ -258,6 +364,8 @@ pub struct Feed<F: Encodable + Decodable + Clone + Send + 'static + Serialize + 
     /// A proposal.
     #[serde(bound(deserialize = "F: DeserializeOwned"))]
     pub content: F,
+    /// The proposal hash.
+    pub hash: Hash,
 }
 
 /// Verify response type.
@@ -339,10 +447,9 @@ impl Node {
 
 /// A proof.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-pub struct Proof<F: Encodable + Decodable + Clone + Send + 'static + Serialize + DeserializeOwned> {
+pub struct Proof {
     /// The hash of a proof.
-    #[serde(bound(deserialize = "F: DeserializeOwned"))]
-    pub block_hash: F,
+    pub block_hash: Hash,
     /// The height of votes in the proof.
     pub height: u64,
     /// The rounf of votes in the proof.
@@ -351,22 +458,62 @@ pub struct Proof<F: Encodable + Decodable + Clone + Send + 'static + Serialize +
     pub precommit_votes: HashMap<Address, Vec<u8>>,
 }
 
-impl<F> Encodable for Proof<F>
-where
-    F: Content + Sync,
-{
+impl Encodable for Proof {
     fn rlp_append(&self, s: &mut RlpStream) {
-        s.append(&self.block_hash)
+        s.begin_list(5)
             .append(&self.height)
-            .append(&self.round);
+            .append(&self.round)
+            .append(&self.block_hash);
+        let mut key_values: Vec<(Address, Signature)> =
+            self.precommit_votes.clone().into_iter().collect();
+        key_values.sort();
+        let mut key_list: Vec<Address> = vec![];
+        let mut value_list: Vec<Signature> = vec![];
+        key_values.iter().for_each(|(address, sig)| {
+            key_list.push(address.to_owned());
+            value_list.push(sig.to_owned());
+        });
+        s.begin_list(key_list.len());
+        for key in key_list {
+            s.append(&key);
+        }
+        s.begin_list(value_list.len());
+        for value in value_list {
+            s.append(&value);
+        }
+    }
+}
 
-        let votes = &self
-            .precommit_votes
-            .iter()
-            .map(|(k, v)| (k.to_vec(), v.to_vec()))
-            .collect::<Vec<_>>();
-        for v in votes.iter() {
-            s.append(&v.0).append(&v.1);
+impl Decodable for Proof {
+    fn decode(r: &Rlp) -> Result<Self, DecoderError> {
+        match r.prototype()? {
+            Prototype::List(5) => {
+                let height: u64 = r.val_at(0)?;
+                let round: u64 = r.val_at(1)?;
+                let block_hash: Hash = r.val_at(2)?;
+                let key_list: Vec<Address> = r.list_at(3)?;
+                let value_list: Vec<Signature> = r.list_at(4)?;
+                if key_list.len() != value_list.len() {
+                    error!(
+                        "Decode proof error, key_list_len {}, value_list_len{}",
+                        key_list.len(),
+                        value_list.len()
+                    );
+                    return Err(DecoderError::RlpIncorrectListLen);
+                }
+                let precommit_votes: HashMap<_, _> =
+                    key_list.into_iter().zip(value_list.into_iter()).collect();
+                Ok(Proof {
+                    height,
+                    round,
+                    block_hash,
+                    precommit_votes,
+                })
+            }
+            _ => {
+                error!("Decode proof error, the prototype is {:?}", r.prototype());
+                Err(DecoderError::RlpInconsistentLengthAndData)
+            }
         }
     }
 }

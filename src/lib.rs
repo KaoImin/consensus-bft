@@ -16,7 +16,7 @@ pub trait ConsensusSupport<F: Content + Sync> {
     type Error: Debug;
     /// Get a proposal content of a height. If success, return `Ok(F)` that `F`
     /// is an example of `Content`, else return `Err()`.
-    fn get_content(&self, height: u64) -> Result<F, Self::Error>;
+    fn get_content(&self, height: u64) -> Result<(F, Vec<u8>), Self::Error>;
     /// Transmit a consensus output to other nodes.
     fn transmit(&self, msg: ConsensusOutput<F>) -> Result<(), Self::Error>;
     /// Check the validity of the transcations of a proposal. If success return `Ok(())`,
