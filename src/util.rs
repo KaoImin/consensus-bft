@@ -1,42 +1,42 @@
 use crate::types::*;
 use bft_core::{types::CoreOutput, FromCore};
 use crossbeam_channel::Sender;
-use rlp::{Decodable, Encodable};
-use serde::{de::DeserializeOwned, Serialize};
+use rlp::Encodable;
 
 /// An independent function to check proof.
-pub fn check_proof<
-    F: Encodable + Decodable + Encodable + Clone + Send + 'static + Serialize + DeserializeOwned,
->(
-    proof: Proof<F>,
+pub fn check_proof(
+    proof: &Proof,
     height: u64,
-    authority: Vec<Node>,
+    authority: &[Node],
     crypt_hash: impl Fn(&[u8]) -> Vec<u8>,
     verify_signature: impl Fn(&[u8], &[u8]) -> Option<Address>,
-    is_turbo: bool,
 ) -> bool {
     if height == 0 {
         return true;
     }
 
-    let authority = into_addr_set(authority);
-    if height != proof.height || 2 * authority.len() >= 3 * proof.precommit_votes.len() {
+    if height != proof.height + 1 {
         return false;
     }
 
-    let proposal = if is_turbo {
-        crypt_hash(&turbo_hash(proof.block_hash.rlp_bytes()))
-    } else {
-        crypt_hash(&proof.block_hash.rlp_bytes())
-    };
+    let vote_addresses: Vec<Address> = proof
+        .precommit_votes
+        .iter()
+        .map(|(sender, _)| sender.clone())
+        .collect();
+
+    if get_votes_weight(authority, &vote_addresses) * 3 <= get_total_weight(authority) * 2 {
+        return false;
+    }
+    let addr_set = into_addr_set(authority.to_owned());
 
     for (sender, sig) in proof.precommit_votes.into_iter() {
-        if authority.contains(&sender) {
+        if addr_set.contains(&sender) {
             let msg = Vote {
                 vote_type: VoteType::Precommit,
                 height: proof.height,
                 round: proof.round,
-                proposal: proposal.clone(),
+                proposal: proof.block_hash.clone(),
                 voter: sender.clone(),
             };
             let hash = crypt_hash(&msg.rlp_bytes());
@@ -51,21 +51,31 @@ pub fn check_proof<
     true
 }
 
+#[inline]
+pub fn get_total_weight(authorities: &[Node]) -> u64 {
+    let weight: Vec<u64> = authorities
+        .iter()
+        .map(|node| u64::from(node.vote_weight))
+        .collect();
+    weight.iter().sum()
+}
+
+#[inline]
+pub fn get_votes_weight(authorities: &[Node], vote_addresses: &[Address]) -> u64 {
+    let votes_weight: Vec<u64> = authorities
+        .iter()
+        .filter(|node| vote_addresses.contains(&node.address))
+        .map(|node| u64::from(node.vote_weight))
+        .collect();
+    votes_weight.iter().sum()
+}
+
 pub(crate) fn into_addr_set(node_set: Vec<Node>) -> Vec<Address> {
     let mut set = Vec::new();
     for node in node_set.into_iter() {
         set.push(node.address);
     }
     set
-}
-
-pub(crate) fn turbo_hash(msg: Vec<u8>) -> Vec<u8> {
-    let mut res = Vec::new();
-    let length = (msg.len() as f64 / 100.0).round() as usize;
-    for i in 0..100 {
-        res.push(msg[i * length]);
-    }
-    res
 }
 
 #[derive(Debug)]
