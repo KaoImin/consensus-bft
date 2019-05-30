@@ -2,7 +2,7 @@ use crate::{
     collection::*,
     error::ConsensusError,
     types::*,
-    util::{into_addr_set, turbo_hash, SendMsg},
+    util::{into_addr_set, SendMsg},
     wal::Wal,
     ConsensusSupport, Content,
 };
@@ -14,7 +14,7 @@ use bft_core::types::{
 use bft_core::Core as BFT;
 use crossbeam_channel::{select, unbounded, Receiver, Sender};
 use crossbeam_utils::thread as crossbeam_thread;
-use log::{error, info, warn};
+use log::{debug, error, info, warn};
 use rlp::Encodable;
 use serde_json::{from_slice, to_string};
 use std::{
@@ -78,7 +78,7 @@ pub(crate) struct Consensus<
     authority: AuthorityManage,
     votes: VoteCollector,
     proposals: ProposalCollector<F>,
-    proof: Option<Proof<F>>,
+    proof: Option<Proof>,
     prev_hash: Option<Hash>,
     wal_log: Wal,
     block_cache: HashMap<Hash, F>,
@@ -181,21 +181,15 @@ where
                 }
             }
             AsyncMsg::Feed(f) => {
-                let hash = if cfg!(feature = "turbo_hash") {
-                    self.function.hash(&turbo_hash(f.content.rlp_bytes()))
-                } else {
-                    self.function.hash(&f.content.rlp_bytes())
-                };
-
                 self.bft
                     .send_bft_msg(CoreInput::Feed(BftFeed {
                         height: f.height,
-                        proposal: hash.clone(),
+                        proposal: f.hash.clone(),
                     }))
                     .map_err(|_| ConsensusError::SendMsgErr)?;
 
                 self.block_cache
-                    .entry(hash)
+                    .entry(f.hash.clone())
                     .or_insert_with(|| f.content.clone());
                 if let Ok(msg) = to_string(&f) {
                     if self
@@ -339,6 +333,7 @@ where
     ) -> Result<SignedProposal<F>> {
         let height = proposal.height;
         let round = proposal.round;
+        info!("Handle BftProposal at height {:?}", self.height);
 
         if height < self.height {
             error!(
@@ -348,8 +343,10 @@ where
             return Err(ConsensusError::BftCoreErr);
         }
 
-        if let Some(origin_proposal) = self.block_cache.get(&proposal.content) {
-            self.verify_proposal(origin_proposal.to_owned());
+        let hash = proposal.content.clone();
+        if self.block_cache.contains_key(&hash) {
+            let block = self.block_cache.get(&hash).unwrap();
+            self.verify_proposal(&hash, block.to_owned());
         } else {
             return Err(ConsensusError::LoseBlock);
         }
@@ -369,6 +366,7 @@ where
     }
 
     fn build_signed_proposal(&mut self, proposal: BftProposal) -> Result<SignedProposal<F>> {
+        debug!("build signed proposal at height {:?}", self.height);
         if self.proof.is_none() && (self.height != 1) {
             return Err(ConsensusError::MissingProof);
         }
@@ -407,7 +405,7 @@ where
             Proof {
                 height: 0,
                 round: 0,
-                block_hash: content.clone(),
+                block_hash: hash.clone(),
                 precommit_votes: HashMap::new(),
             }
         } else {
@@ -417,7 +415,7 @@ where
         let signed_proposal = Proposal {
             height,
             round,
-            content,
+            hash,
             proof,
             lock_round,
             lock_votes,
@@ -433,6 +431,7 @@ where
         Ok(SignedProposal {
             proposal: signed_proposal,
             signature: sig,
+            content,
         })
     }
 
@@ -498,12 +497,12 @@ where
 
         let round = commit.round;
         let vote = commit.lock_votes.clone();
-        let proposal = commit.proposal;
+        let hash = commit.proposal;
 
-        let proposal = self.block_cache.get(&proposal);
+        let proposal = self.block_cache.get(&hash);
         if proposal.is_some() {
             let proposal = proposal.unwrap().to_owned();
-            let proof = self.generate_proof(height, round, proposal.clone(), vote)?;
+            let proof = self.generate_proof(height, round, hash, vote)?;
             if let Some(prev_hash) = &self.prev_hash {
                 let res = Commit {
                     height,
@@ -528,10 +527,11 @@ where
 
         crossbeam_thread::scope(|s| {
             s.spawn(|_| {
-                if let Ok(proposal) = func.get_content(height) {
+                if let Ok((proposal, hash)) = func.get_content(height) {
                     sender
                         .send(AsyncMsg::Feed(Feed {
                             content: proposal,
+                            hash,
                             height,
                         }))
                         .unwrap();
@@ -541,26 +541,20 @@ where
         .unwrap();
     }
 
-    fn verify_proposal(&mut self, proposal: F) {
+    fn verify_proposal(&mut self, proposal_hash: &Hash, proposal: F) {
         let func = self.function.clone();
         let height = self.height;
         let sender = self.async_send.clone();
 
         crossbeam_thread::scope(|s| {
             s.spawn(|_| {
-                let is_pass = func.check_proposal(proposal.clone(), height).is_ok();
+                let is_pass = func.check_proposal(proposal_hash, proposal, height).is_ok();
                 info!("Receive verify result {:?} at height {:?}", is_pass, height);
-
-                let hash = if cfg!(feature = "turbo_hash") {
-                    self.function.hash(&turbo_hash(proposal.rlp_bytes()))
-                } else {
-                    self.function.hash(&proposal.rlp_bytes())
-                };
 
                 sender
                     .send(AsyncMsg::VerifyResp(VerifyResp {
                         is_pass,
-                        proposal: hash,
+                        proposal: proposal_hash.to_vec(),
                     }))
                     .unwrap();
             });
@@ -572,9 +566,9 @@ where
         &mut self,
         height: u64,
         round: u64,
-        block_hash: F,
+        block_hash: Vec<u8>,
         vote: Vec<BftVote>,
-    ) -> Result<Proof<F>> {
+    ) -> Result<Proof> {
         let mut tmp = HashMap::new();
         if let Some(vote_set) = self.votes.get_vote_set(height, round, VoteType::Precommit) {
             for v in vote.into_iter() {
@@ -627,14 +621,9 @@ where
             );
             return Err(ConsensusError::ObsoleteMsg);
         }
-        let content = proposal.content.clone();
 
-        let hash = if cfg!(feature = "turbo_hash") {
-            self.function.hash(&turbo_hash(content.rlp_bytes()))
-        } else {
-            self.function.hash(&content.rlp_bytes())
-        };
-
+        let content = msg.content.clone();
+        let hash = proposal.hash.clone();
         self.block_cache
             .entry(hash.clone())
             .or_insert_with(|| content.clone());
@@ -689,7 +678,7 @@ where
                 proposal: hash.clone(),
             })
         } else {
-            self.verify_proposal(msg.proposal.content);
+            self.verify_proposal(&hash, content);
             None
         };
 
@@ -917,7 +906,7 @@ where
         Ok(sender)
     }
 
-    fn check_proof(&mut self, height: u64, proof: &Proof<F>) -> Result<()> {
+    fn check_proof(&mut self, height: u64, proof: &Proof) -> Result<()> {
         if height != self.height {
             error!(
                 "The height {} is less than self.height {}, which should not happen!",
@@ -974,7 +963,7 @@ where
         Ok(())
     }
 
-    fn verify_proof(&self, proof: &Proof<F>, h: u64, authority: &[Node]) -> bool {
+    fn verify_proof(&self, proof: &Proof, h: u64, authority: &[Node]) -> bool {
         if h == 0 {
             return true;
         }
@@ -986,18 +975,12 @@ where
 
         for (sender, sig) in proof.precommit_votes.clone().into_iter() {
             if authority.contains(&sender) {
-                let proposal = if cfg!(feature = "turbo_hash") {
-                    self.function
-                        .hash(&turbo_hash(proof.block_hash.rlp_bytes()))
-                } else {
-                    self.function.hash(&proof.block_hash.rlp_bytes())
-                };
-
+                let proposal = &proof.block_hash;
                 let msg = Vote {
                     vote_type: VoteType::Precommit,
                     height: proof.height,
                     round: proof.round,
-                    proposal,
+                    proposal: proposal.to_vec(),
                     voter: sender.clone(),
                 };
                 let hash = self.function.hash(&msg.rlp_bytes());
@@ -1060,11 +1043,7 @@ where
                 LOG_TYPE_BLOCK_TXS => {
                     info!("Consensus loads block_txs message");
                     let msg: Feed<F> = from_slice(&msg).expect("Try from message failed!");
-                    let hash = if cfg!(feature = "turbo_hash") {
-                        self.function.hash(&turbo_hash(msg.content.rlp_bytes()))
-                    } else {
-                        self.function.hash(&msg.content.rlp_bytes())
-                    };
+                    let hash = msg.hash.clone();
 
                     self.bft
                         .send_bft_msg(CoreInput::Feed(BftFeed {
@@ -1072,18 +1051,12 @@ where
                             proposal: hash.clone(),
                         }))
                         .expect("Consensus hands over bft_status failed!");
-                    self.block_cache
-                        .entry(hash)
-                        .or_insert_with(|| msg.content.clone());
+                    self.block_cache.entry(hash).or_insert_with(|| msg.content);
                 }
                 LOG_TYPE_VERIFY_BLOCK_PESP => {
                     info!("Consensus loads verify_block_resp message");
                     let msg: VerifyResp = from_slice(&msg).expect("Try from message failed!");
-                    let hash = if cfg!(feature = "turbo_hash") {
-                        self.function.hash(&turbo_hash(msg.proposal.rlp_bytes()))
-                    } else {
-                        self.function.hash(&msg.proposal.rlp_bytes())
-                    };
+                    let hash = msg.proposal;
 
                     self.bft
                         .send_bft_msg(CoreInput::VerifyResp(BftVerifyResp {
