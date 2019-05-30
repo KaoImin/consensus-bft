@@ -118,6 +118,13 @@ where
     }
 }
 
+impl<F: Content + Sync> SignedProposal<F> {
+    ///
+    pub fn get_block(&self) -> F {
+        self.content.clone()
+    }
+}
+
 /// A Proposal.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
 pub struct Proposal {
@@ -322,10 +329,48 @@ pub struct Commit<F: Encodable + Decodable + Clone + Send + 'static + Serialize 
     /// The previous hash.
     pub prev_hash: Hash,
     /// The proof of the commit.
-    #[serde(bound(deserialize = "F: DeserializeOwned"))]
     pub proof: Proof,
     /// The address of the node.
     pub address: Address,
+}
+
+impl<F> Encodable for Commit<F>
+where
+    F: Content + Sync,
+{
+    fn rlp_append(&self, s: &mut RlpStream) {
+        s.begin_list(5)
+            .append(&self.height)
+            .append(&self.result)
+            .append(&self.proof)
+            .append(&self.prev_hash)
+            .append(&self.address);
+    }
+}
+
+impl<F> Decodable for Commit<F>
+where
+    F: Content + Sync,
+{
+    fn decode(r: &Rlp) -> Result<Self, DecoderError> {
+        match r.prototype()? {
+            Prototype::List(5) => {
+                let height: u64 = r.val_at(0)?;
+                let result: F = r.val_at(1)?;
+                let proof: Proof = r.val_at(2)?;
+                let prev_hash: Hash = r.val_at(3)?;
+                let address: Address = r.val_at(4)?;
+                Ok(Commit {
+                    height,
+                    result,
+                    proof,
+                    prev_hash,
+                    address,
+                })
+            }
+            _ => Err(DecoderError::RlpInconsistentLengthAndData),
+        }
+    }
 }
 
 /// A rich status.

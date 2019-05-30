@@ -30,7 +30,7 @@ pub fn check_proof(
     }
     let addr_set = into_addr_set(authority.to_owned());
 
-    for (sender, sig) in proof.precommit_votes.into_iter() {
+    for (sender, sig) in proof.to_owned().precommit_votes.into_iter() {
         if addr_set.contains(&sender) {
             let msg = Vote {
                 vote_type: VoteType::Precommit,
@@ -51,6 +51,7 @@ pub fn check_proof(
     true
 }
 
+///
 #[inline]
 pub fn get_total_weight(authorities: &[Node]) -> u64 {
     let weight: Vec<u64> = authorities
@@ -60,6 +61,7 @@ pub fn get_total_weight(authorities: &[Node]) -> u64 {
     weight.iter().sum()
 }
 
+///
 #[inline]
 pub fn get_votes_weight(authorities: &[Node], vote_addresses: &[Address]) -> u64 {
     let votes_weight: Vec<u64> = authorities
