@@ -1,5 +1,5 @@
 use consensus_bft::{
-    types::{Address, Commit, ConsensusOutput},
+    types::{Address, Hash, Commit, ConsensusOutput, Signature},
     ConsensusSupport, Content,
 };
 use crossbeam_channel::{Receiver, Sender};
@@ -13,14 +13,14 @@ pub(crate) enum Error {
 pub(crate) struct Support<F: Content + Sync> {
     address: Vec<u8>,
     send: Sender<u64>,
-    recv: Receiver<F>,
+    recv: Receiver<(F, Hash)>,
 }
 
 impl<F> Support<F>
 where
     F: Content + Sync,
 {
-    pub(crate) fn new(address: Vec<u8>, send: Sender<u64>, recv: Receiver<F>) -> Self {
+    pub(crate) fn new(address: Vec<u8>, send: Sender<u64>, recv: Receiver<(F, Hash)>) -> Self {
         Support {
             address,
             send,
@@ -39,7 +39,7 @@ where
         Ok(())
     }
 
-    fn check_proposal(&self, _block: F, _height: u64) -> Result<(), Self::Error> {
+    fn check_proposal(&self, _block_hash: &Hash, _block: F, _height: u64) -> Result<(), Self::Error> {
         Ok(())
     }
 
@@ -48,7 +48,7 @@ where
         Ok(())
     }
 
-    fn sign(&self, _hash: &[u8]) -> Result<Vec<u8>, Self::Error> {
+    fn sign(&self, _hash: &[u8]) -> Result<Signature, Self::Error> {
         Ok(self.address.clone())
     }
 
@@ -56,11 +56,11 @@ where
         Ok(self.address.clone())
     }
 
-    fn hash(&self, msg: &[u8]) -> Vec<u8> {
+    fn hash(&self, msg: &[u8]) -> Hash {
         msg.to_vec()
     }
 
-    fn get_content(&self, _height: u64) -> Result<F, Self::Error> {
+    fn get_content(&self, _height: u64) -> Result<(F, Hash), Self::Error> {
         self.recv.recv().map_err(|_| Error::SupportError)
     }
 }

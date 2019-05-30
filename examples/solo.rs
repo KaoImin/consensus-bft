@@ -44,7 +44,7 @@ fn main() {
     let mut builder = Builder::from_default_env();
     builder.filter(None, log::LevelFilter::Debug).init();
 
-    let (s_proposal, r_proposal) = bounded::<BftContent>(1);
+    let (s_proposal, r_proposal) = bounded::<(BftContent, Vec<u8>)>(1);
     let (s_signal, r_signal) = bounded::<u64>(1);
     let support = Support::new(vec![1, 2, 3], s_signal, r_proposal);
     let executor = ConsensusExecutor::new(support, vec![1, 2, 3], "examples/wal/log");
@@ -61,7 +61,8 @@ fn main() {
         println!("Send Genesis");
 
         loop {
-            s_proposal.send(BftContent::new(1)).unwrap();
+            let msg = BftContent::new(1);
+            s_proposal.send((msg.clone(), msg.0)).unwrap();
             println!("Send proposal");
 
             if let Ok(height) = r_signal.recv() {
