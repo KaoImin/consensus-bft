@@ -79,7 +79,6 @@ pub(crate) struct Consensus<
     votes: VoteCollector,
     proposals: ProposalCollector<F>,
     proof: Option<Proof>,
-    prev_hash: Option<Hash>,
     wal_log: Wal,
     block_cache: HashMap<Hash, F>,
     proposal_cache: HashMap<u64, Vec<SignedProposal<F>>>,
@@ -118,7 +117,6 @@ where
             votes: VoteCollector::new(),
             proposals: ProposalCollector::new(),
             proof: None,
-            prev_hash: None,
             wal_log: Wal::new(wal_path).unwrap(),
             block_cache: HashMap::new(),
             proposal_cache: HashMap::new(),
@@ -510,19 +508,14 @@ where
         if proposal.is_some() {
             let proposal = proposal.unwrap().to_owned();
             let proof = self.generate_proof(height, round, hash, vote)?;
-            if let Some(prev_hash) = &self.prev_hash {
-                let res = Commit {
-                    height,
-                    prev_hash: prev_hash.to_owned(),
-                    result: proposal,
-                    address: commit.address,
-                    proof: proof.clone(),
-                };
-                self.proof = Some(proof);
-                return Ok(res);
-            } else {
-                return Err(ConsensusError::MissingPrevHash);
-            }
+            let res = Commit {
+                height,
+                result: proposal,
+                address: commit.address,
+                proof: proof.clone(),
+            };
+            self.proof = Some(proof);
+            Ok(res)
         } else {
             Err(ConsensusError::LoseBlock)
         }
@@ -775,8 +768,6 @@ where
             }
         }
 
-        let prev_hash = rich_status.prev_hash.clone();
-        self.prev_hash = Some(prev_hash);
         self.authority
             .update_authority(self.height, rich_status.authority_list.clone());
 

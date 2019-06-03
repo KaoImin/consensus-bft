@@ -59,7 +59,6 @@ fn main() {
                 height: 0,
                 interval: None,
                 authority_list: vec![Node::new(vec![1, 2, 3])],
-                prev_hash: vec![0, 0, 0],
             }))
             .unwrap();
         println!("Send Genesis");
@@ -76,7 +75,6 @@ fn main() {
                         height,
                         interval: None,
                         authority_list: vec![Node::new(vec![1, 2, 3])],
-                        prev_hash: (0..160).map(|_| random::<u8>()).collect::<Vec<_>>(),
                     }))
                     .unwrap();
             }

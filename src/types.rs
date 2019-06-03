@@ -326,8 +326,6 @@ pub struct Commit<F: Encodable + Decodable + Clone + Send + 'static + Serialize 
     /// The consensus result.
     #[serde(bound(deserialize = "F: DeserializeOwned"))]
     pub result: F,
-    /// The previous hash.
-    pub prev_hash: Hash,
     /// The proof of the commit.
     pub proof: Proof,
     /// The address of the node.
@@ -339,11 +337,10 @@ where
     F: Content + Sync,
 {
     fn rlp_append(&self, s: &mut RlpStream) {
-        s.begin_list(5)
+        s.begin_list(4)
             .append(&self.height)
             .append(&self.result)
             .append(&self.proof)
-            .append(&self.prev_hash)
             .append(&self.address);
     }
 }
@@ -354,17 +351,15 @@ where
 {
     fn decode(r: &Rlp) -> Result<Self, DecoderError> {
         match r.prototype()? {
-            Prototype::List(5) => {
+            Prototype::List(4) => {
                 let height: u64 = r.val_at(0)?;
                 let result: F = r.val_at(1)?;
                 let proof: Proof = r.val_at(2)?;
-                let prev_hash: Hash = r.val_at(3)?;
-                let address: Address = r.val_at(4)?;
+                let address: Address = r.val_at(3)?;
                 Ok(Commit {
                     height,
                     result,
                     proof,
-                    prev_hash,
                     address,
                 })
             }
@@ -378,8 +373,6 @@ where
 pub struct Status {
     /// The height of a status.
     pub height: u64,
-    /// The block hash of the height.
-    pub prev_hash: Hash,
     /// The consensus interval. If it is `None`, use the default interval that is 3 seconds.
     pub interval: Option<u64>,
     /// The authority of the next height.
@@ -500,7 +493,7 @@ pub struct Proof {
     /// The rounf of votes in the proof.
     pub round: u64,
     /// The precommit vote set of the proof.
-    pub precommit_votes: HashMap<Address, Vec<u8>>,
+    pub precommit_votes: HashMap<Address, Hash>,
 }
 
 impl Encodable for Proof {
