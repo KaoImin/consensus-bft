@@ -23,7 +23,7 @@ rand = "0.5.5"
 
 [features]
 default = ["async_verify"]
-turbo_hash = ["async_verify"]
+wal_on = ["async_verify"]
 async_verify = ["bft-core/async_verify"]
 
 [[bench]]

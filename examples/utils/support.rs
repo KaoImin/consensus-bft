@@ -1,5 +1,5 @@
 use consensus_bft::{
-    types::{Address, Hash, Commit, ConsensusOutput, Signature},
+    types::{Address, Commit, ConsensusOutput, Hash, Signature},
     ConsensusSupport, Content,
 };
 use crossbeam_channel::{Receiver, Sender};
@@ -39,7 +39,12 @@ where
         Ok(())
     }
 
-    fn check_proposal(&self, _block_hash: &Hash, _block: F, _height: u64) -> Result<(), Self::Error> {
+    fn check_proposal(
+        &self,
+        _block_hash: &Hash,
+        _block: F,
+        _height: u64,
+    ) -> Result<(), Self::Error> {
         Ok(())
     }
 

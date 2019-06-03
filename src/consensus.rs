@@ -139,7 +139,11 @@ where
         // self.load_wal_log();
         thread::spawn(move || {
             let mut engine = Consensus::new(support, address, recv, wal_path);
-            engine.load_wal_log();
+            #[cfg(feature = "wal_on")]
+            {
+                engine.load_wal_log();
+            }
+
             loop {
                 select! {
                     recv(engine.bft_recv) -> bft_msg => if let Ok(bft_msg) = bft_msg {
@@ -167,17 +171,18 @@ where
                     }))
                     .map_err(|_| ConsensusError::SendMsgErr)?;
                 self.verified_block.entry(hash).or_insert(vr.is_pass);
-
-                if let Ok(res) = to_string(&vr) {
-                    if self
-                        .wal_log
-                        .save(self.height, LOG_TYPE_VERIFY_BLOCK_PESP, res)
-                        .is_err()
-                    {
-                        return Err(ConsensusError::SaveWalErr);
+                if cfg!(feature = "wal_on") {
+                    if let Ok(res) = to_string(&vr) {
+                        if self
+                            .wal_log
+                            .save(self.height, LOG_TYPE_VERIFY_BLOCK_PESP, res)
+                            .is_err()
+                        {
+                            return Err(ConsensusError::SaveWalErr);
+                        }
+                    } else {
+                        return Err(ConsensusError::SerJsonErr);
                     }
-                } else {
-                    return Err(ConsensusError::SerJsonErr);
                 }
             }
             AsyncMsg::Feed(f) => {
@@ -191,16 +196,18 @@ where
                 self.block_cache
                     .entry(f.hash.clone())
                     .or_insert_with(|| f.content.clone());
-                if let Ok(msg) = to_string(&f) {
-                    if self
-                        .wal_log
-                        .save(self.height, LOG_TYPE_BLOCK_TXS, msg)
-                        .is_err()
-                    {
-                        return Err(ConsensusError::SaveWalErr);
+                if cfg!(feature = "wal_on") {
+                    if let Ok(msg) = to_string(&f) {
+                        if self
+                            .wal_log
+                            .save(self.height, LOG_TYPE_BLOCK_TXS, msg)
+                            .is_err()
+                        {
+                            return Err(ConsensusError::SaveWalErr);
+                        }
+                    } else {
+                        return Err(ConsensusError::SerJsonErr);
                     }
-                } else {
-                    return Err(ConsensusError::SerJsonErr);
                 }
             }
         }
@@ -351,7 +358,7 @@ where
             return Err(ConsensusError::LoseBlock);
         }
 
-        if need_wal {
+        if cfg!(feature = "wal_on") && need_wal {
             if let Ok(msg) = to_string(&proposal) {
                 if self.wal_log.save(height, LOG_TYPE_PROPOSAL, msg).is_err() {
                     return Err(ConsensusError::SaveWalErr);
@@ -445,7 +452,7 @@ where
             return Err(ConsensusError::BftCoreErr);
         }
 
-        if need_wal {
+        if cfg!(feature = "wal_on") && need_wal {
             if let Ok(msg) = to_string(&vote) {
                 if self.wal_log.save(height, LOG_TYPE_VOTE, msg).is_err() {
                     return Err(ConsensusError::SaveWalErr);
@@ -485,7 +492,7 @@ where
             return Err(ConsensusError::BftCoreErr);
         }
 
-        if need_wal {
+        if cfg!(feature = "wal_on") && need_wal {
             if let Ok(msg) = to_string(&commit) {
                 if self.wal_log.save(height, LOG_TYPE_COMMIT, msg).is_err() {
                     return Err(ConsensusError::SaveWalErr);
@@ -629,7 +636,7 @@ where
             .or_insert_with(|| content.clone());
 
         if height >= self.height {
-            if height - self.height < CACHE_NUMBER as u64 && need_wal {
+            if cfg!(feature = "wal_on") && height - self.height < CACHE_NUMBER as u64 && need_wal {
                 if let Ok(res) = to_string(&msg) {
                     if self
                         .wal_log
@@ -716,7 +723,7 @@ where
         let bft_vote = vote.to_bft_vote();
 
         if height >= self.height {
-            if height - self.height < CACHE_NUMBER as u64 && need_wal {
+            if cfg!(feature = "wal_on") && height - self.height < CACHE_NUMBER as u64 && need_wal {
                 if let Ok(res) = to_string(&msg) {
                     if self.wal_log.save(height, LOG_TYPE_RAW_BYTES, res).is_err() {
                         return Err(ConsensusError::SaveWalErr);
@@ -754,7 +761,7 @@ where
             return Err(ConsensusError::ObsoleteMsg);
         }
 
-        if need_wal {
+        if cfg!(feature = "wal_on") && need_wal {
             if let Ok(msg) = to_string(&rich_status) {
                 if self
                     .wal_log
@@ -998,6 +1005,7 @@ where
     }
 
     #[warn(dead_code)]
+    #[cfg(feature = "wal_on")]
     fn load_wal_log(&mut self) {
         info!("Consensus starts to load wal log!");
         let vec_buf = self.wal_log.load();
