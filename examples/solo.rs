@@ -16,11 +16,7 @@ use utils::support::Support;
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BftContent(Vec<u8>);
 
-impl Content for BftContent {
-    fn hash(&self) -> Vec<u8> {
-        self.0.clone()
-    }
-}
+impl Content for BftContent {}
 
 impl BftContent {
     pub(crate) fn new(size: usize) -> Self {

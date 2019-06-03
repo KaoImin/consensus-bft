@@ -39,8 +39,6 @@ pub trait ConsensusSupport<F: Content + Sync> {
 pub trait Content:
     Encodable + Decodable + Clone + Debug + Send + 'static + Serialize + DeserializeOwned
 {
-    /// A function to get content hash.
-    fn hash(&self) -> Vec<u8>;
 }
 
 /// Vote collection and proposal collection.
