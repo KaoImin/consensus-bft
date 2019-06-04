@@ -37,7 +37,7 @@ pub trait ConsensusSupport<F: Content + Sync> {
 /// `Send`, `'static`, `Serialize` and `Deserialize`.
 pub trait Content: Clone + Debug + Send + 'static + Serialize + DeserializeOwned {
     /// A function to encode the content into bytes.
-    fn encode(&self) -> Vec<u8>;
+    fn encode(self) -> Vec<u8>;
     /// A function to decode bytes into Content.
     fn decode(bytes: &[u8]) -> Result<Self, ::std::io::Error>;
     /// A function to crypt the content hash.
