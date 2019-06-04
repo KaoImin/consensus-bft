@@ -13,14 +13,14 @@ pub(crate) enum Error {
 pub(crate) struct Support<F: Content + Sync> {
     address: Vec<u8>,
     send: Sender<u64>,
-    recv: Receiver<(F, Hash)>,
+    recv: Receiver<F>,
 }
 
 impl<F> Support<F>
 where
     F: Content + Sync,
 {
-    pub(crate) fn new(address: Vec<u8>, send: Sender<u64>, recv: Receiver<(F, Hash)>) -> Self {
+    pub(crate) fn new(address: Vec<u8>, send: Sender<u64>, recv: Receiver<F>) -> Self {
         Support {
             address,
             send,
@@ -41,8 +41,8 @@ where
 
     fn check_proposal(
         &self,
-        _block_hash: &Hash,
-        _block: F,
+        _block_hash: &[u8],
+        _block: &F,
         _height: u64,
     ) -> Result<(), Self::Error> {
         Ok(())
@@ -65,7 +65,7 @@ where
         msg.to_vec()
     }
 
-    fn get_content(&self, _height: u64) -> Result<(F, Hash), Self::Error> {
+    fn get_content(&self, _height: u64) -> Result<F, Self::Error> {
         self.recv.recv().map_err(|_| Error::SupportError)
     }
 }

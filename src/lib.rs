@@ -6,7 +6,6 @@
 #![warn(dead_code)]
 
 use crate::types::{Address, Commit, ConsensusOutput, Hash, Signature};
-use rlp::{Decodable, Encodable};
 use serde::{de::DeserializeOwned, ser::Serialize};
 use std::fmt::Debug;
 
@@ -16,12 +15,12 @@ pub trait ConsensusSupport<F: Content + Sync> {
     type Error: Debug;
     /// Get a proposal content of a height. If success, return `Ok(F)` that `F`
     /// is an example of `Content`, else return `Err()`.
-    fn get_content(&self, height: u64) -> Result<(F, Hash), Self::Error>;
+    fn get_content(&self, height: u64) -> Result<F, Self::Error>;
     /// Transmit a consensus output to other nodes.
     fn transmit(&self, msg: ConsensusOutput<F>) -> Result<(), Self::Error>;
     /// Check the validity of the transcations of a proposal. If success return `Ok(())`,
     /// else return `Err()`.
-    fn check_proposal(&self, block_hash: &Hash, block: F, height: u64) -> Result<(), Self::Error>;
+    fn check_proposal(&self, block_hash: &[u8], block: &F, height: u64) -> Result<(), Self::Error>;
     /// Do commit.
     fn commit(&self, commit: Commit<F>) -> Result<(), Self::Error>;
     /// Use the given hash and private key to sign a signature. If success, return `Ok(signature)`,
@@ -34,11 +33,15 @@ pub trait ConsensusSupport<F: Content + Sync> {
     fn hash(&self, msg: &[u8]) -> Hash;
 }
 
-/// A trait define the proposal content, wrapper `Decodable`, `Encodable`, `Clone`, `Debug`,
+/// A trait define the proposal content, wrapper `Clone`, `Debug`,
 /// `Send`, `'static`, `Serialize` and `Deserialize`.
-pub trait Content:
-    Encodable + Decodable + Clone + Debug + Send + 'static + Serialize + DeserializeOwned
-{
+pub trait Content: Clone + Debug + Send + 'static + Serialize + DeserializeOwned {
+    /// A function to encode the content into bytes.
+    fn encode(&self) -> Vec<u8>;
+    /// A function to decode bytes into Content.
+    fn decode(bytes: &[u8]) -> Result<Self, ::std::io::Error>;
+    /// A function to crypt the content hash.
+    fn hash(&self) -> Vec<u8>;
 }
 
 /// Vote collection and proposal collection.

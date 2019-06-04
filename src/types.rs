@@ -16,11 +16,11 @@ pub type Signature = Vec<u8>;
 
 /// Consensus input message types.
 #[derive(Debug, Clone)]
-pub enum ConsensusInput<F: Content + Sync> {
+pub enum ConsensusInput {
     /// Signed proposal message.
-    SignedProposal(SignedProposal<F>),
+    SignedProposal(Vec<u8>),
     /// Signed vote message.
-    SignedVote(SignedVote),
+    SignedVote(Vec<u8>),
     /// Rich status message.
     Status(Status),
 }
@@ -38,9 +38,9 @@ pub(crate) enum AsyncMsg<F: Content + Sync> {
 #[derive(Debug, Clone)]
 pub enum ConsensusOutput<F: Content + Sync> {
     /// Signed proposal message.
-    SignedProposal(SignedProposal<F>),
+    SignedProposal(Vec<u8>),
     /// Signed vote message.
-    SignedVote(SignedVote),
+    SignedVote(Vec<u8>),
     /// Commit message.
     Commit(Commit<F>),
 }
@@ -75,53 +75,34 @@ impl Into<u8> for VoteType {
 
 /// A signed proposal.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-pub struct SignedProposal<F: Content + Sync> {
+pub struct SignedProposal {
     /// A proposal.
     pub proposal: Proposal,
     /// A signature of the proposal.
     pub signature: Signature,
-    #[serde(bound(deserialize = "F: DeserializeOwned"))]
-    /// The block content.
-    pub content: F,
 }
 
-impl<F> Encodable for SignedProposal<F>
-where
-    F: Content + Sync,
-{
+impl Encodable for SignedProposal {
     fn rlp_append(&self, s: &mut RlpStream) {
         s.begin_list(3)
             .append(&self.proposal)
-            .append(&self.signature)
-            .append(&self.content);
+            .append(&self.signature);
     }
 }
 
-impl<F> Decodable for SignedProposal<F>
-where
-    F: Content + Sync,
-{
+impl Decodable for SignedProposal {
     fn decode(r: &Rlp) -> Result<Self, DecoderError> {
         match r.prototype()? {
             Prototype::List(3) => {
                 let proposal: Proposal = r.val_at(0)?;
                 let signature: Signature = r.val_at(1)?;
-                let content: F = r.val_at(2)?;
                 Ok(SignedProposal {
                     proposal,
                     signature,
-                    content,
                 })
             }
             _ => Err(DecoderError::RlpInconsistentLengthAndData),
         }
-    }
-}
-
-impl<F: Content + Sync> SignedProposal<F> {
-    ///
-    pub fn get_block(&self) -> F {
-        self.content.clone()
     }
 }
 
@@ -319,8 +300,7 @@ impl Vote {
 
 /// A commit.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-pub struct Commit<F: Encodable + Decodable + Clone + Send + 'static + Serialize + DeserializeOwned>
-{
+pub struct Commit<F: Clone + Send + 'static + Serialize + DeserializeOwned> {
     /// The height of a commit.
     pub height: u64,
     /// The consensus result.
@@ -332,38 +312,16 @@ pub struct Commit<F: Encodable + Decodable + Clone + Send + 'static + Serialize 
     pub address: Address,
 }
 
-impl<F> Encodable for Commit<F>
+impl<F> Commit<F>
 where
-    F: Content + Sync,
+    F: Clone + Send + 'static + Serialize + DeserializeOwned,
 {
-    fn rlp_append(&self, s: &mut RlpStream) {
-        s.begin_list(4)
-            .append(&self.height)
-            .append(&self.result)
-            .append(&self.proof)
-            .append(&self.address);
-    }
-}
-
-impl<F> Decodable for Commit<F>
-where
-    F: Content + Sync,
-{
-    fn decode(r: &Rlp) -> Result<Self, DecoderError> {
-        match r.prototype()? {
-            Prototype::List(4) => {
-                let height: u64 = r.val_at(0)?;
-                let result: F = r.val_at(1)?;
-                let proof: Proof = r.val_at(2)?;
-                let address: Address = r.val_at(3)?;
-                Ok(Commit {
-                    height,
-                    result,
-                    proof,
-                    address,
-                })
-            }
-            _ => Err(DecoderError::RlpInconsistentLengthAndData),
+    pub(crate) fn new(height: u64, result: F, proof: Proof, address: Address) -> Self {
+        Commit {
+            height,
+            result,
+            proof,
+            address,
         }
     }
 }
@@ -396,14 +354,12 @@ impl Status {
 
 /// A feed.
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-pub struct Feed<F: Encodable + Decodable + Clone + Send + 'static + Serialize + DeserializeOwned> {
+pub struct Feed<F: Clone + Send + 'static + Serialize + DeserializeOwned> {
     /// The height of the proposal.
     pub height: u64,
     /// A proposal.
     #[serde(bound(deserialize = "F: DeserializeOwned"))]
     pub content: F,
-    /// The proposal hash.
-    pub hash: Hash,
 }
 
 /// Verify response type.
