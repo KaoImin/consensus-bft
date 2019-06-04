@@ -17,8 +17,8 @@ use utils::support::Support;
 pub struct BftContent(Vec<u8>);
 
 impl Content for BftContent {
-    fn encode(self) -> Vec<u8> {
-        self.0.clone()
+    fn encode(self) -> Result<Vec<u8>, ::std::io::Error> {
+        Ok(self.0.clone())
     }
 
     fn decode(_bytes: &[u8]) -> Result<Self, ::std::io::Error> {

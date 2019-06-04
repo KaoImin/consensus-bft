@@ -6,6 +6,8 @@ pub enum ConsensusError {
     ///
     DecodeErr,
     ///
+    EncodeErr,
+    ///
     SendMsgErr,
     ///
     SupportErr,

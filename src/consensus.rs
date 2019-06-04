@@ -369,10 +369,11 @@ where
         let signed_proposal = self.build_signed_proposal(proposal)?;
         self.proposals.add(height, round, &signed_proposal);
 
-        if let Some(content) = self.block_origin_cache.get(&hash) {
+        if let Some(content) = self.block_origin_cache.get(&hash).cloned() {
+            let content_encode = content.encode().map_err(|_| ConsensusError::EncodeErr)?;
             let encode = combine(
                 &signed_proposal.rlp_bytes(),
-                &encode_block(self.height, &content.to_owned().encode(), &hash),
+                &encode_block(self.height, &content_encode, &hash),
             );
             Ok(encode)
         } else {
