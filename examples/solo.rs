@@ -11,17 +11,19 @@ use rand::random;
 use rlp::{Decodable, DecoderError, Encodable, Rlp, RlpStream};
 use serde::{Deserialize, Serialize};
 use std::thread;
-use utils::support::Support;
+use utils::support::{Error, Support};
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct BftContent(Vec<u8>);
 
 impl Content for BftContent {
-    fn encode(self) -> Result<Vec<u8>, ::std::io::Error> {
+    type Error = Error;
+
+    fn encode(self) -> Result<Vec<u8>, Self::Error> {
         Ok(self.0.clone())
     }
 
-    fn decode(_bytes: &[u8]) -> Result<Self, ::std::io::Error> {
+    fn decode(_bytes: &[u8]) -> Result<Self, Self::Error> {
         Ok(BftContent(vec![]))
     }
 

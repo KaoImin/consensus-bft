@@ -5,7 +5,7 @@ use consensus_bft::{
 use crossbeam_channel::{Receiver, Sender};
 
 #[derive(Clone, Debug)]
-pub(crate) enum Error {
+pub enum Error {
     SupportError,
 }
 
