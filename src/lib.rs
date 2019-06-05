@@ -20,7 +20,7 @@ pub trait ConsensusSupport<F: Content + Sync> {
     fn transmit(&self, msg: ConsensusOutput<F>) -> Result<(), Self::Error>;
     /// Check the validity of the transcations of a proposal. If success return `Ok(())`,
     /// else return `Err()`.
-    fn check_proposal(&self, block_hash: &[u8], block: &F, height: u64) -> Result<(), Self::Error>;
+    fn check_proposal(&self, proposal_hash: &[u8], proposal: &F, height: u64) -> Result<(), Self::Error>;
     /// Do commit.
     fn commit(&self, commit: Commit<F>) -> Result<(), Self::Error>;
     /// Use the given hash and private key to sign a signature. If success, return `Ok(signature)`,
