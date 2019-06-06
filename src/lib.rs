@@ -5,7 +5,7 @@
 #![warn(unused_imports)]
 #![warn(dead_code)]
 
-use crate::types::{Address, Commit, ConsensusOutput, Hash, Signature};
+use crate::types::{Address, Commit, ConsensusOutput, Hash, Signature, Status};
 use serde::{de::DeserializeOwned, ser::Serialize};
 use std::fmt::Debug;
 
@@ -28,7 +28,7 @@ pub trait ConsensusSupport<F: Content + Sync> {
         height: u64,
     ) -> Result<(), Self::Error>;
     /// Do commit.
-    fn commit(&self, commit: Commit<F>) -> Result<(), Self::Error>;
+    fn commit(&self, commit: Commit<F>) -> Result<Status, Self::Error>;
     /// Use the given hash and private key to sign a signature. If success, return `Ok(signature)`,
     /// else return `Err()`.
     fn sign(&self, hash: &[u8]) -> Result<Signature, Self::Error>;

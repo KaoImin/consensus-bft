@@ -312,9 +312,10 @@ where
             CoreOutput::Commit(c) => {
                 info!("Receive commit");
                 let commit = self.handle_commit(c, true)?;
-                self.function
+                let status = self.function
                     .commit(commit)
-                    .map_err(|_| ConsensusError::SupportErr)
+                    .map_err(|_| ConsensusError::SupportErr)?;
+                self.external_process(ConsensusInput::Status(status))
             }
             CoreOutput::GetProposalRequest(h) => {
                 info!("Receive get proposal request");
