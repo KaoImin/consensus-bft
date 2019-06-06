@@ -8,7 +8,6 @@
 use crate::types::{Address, Commit, ConsensusOutput, Hash, Signature};
 use serde::{de::DeserializeOwned, ser::Serialize};
 use std::fmt::Debug;
-use std::hash::Hash as StdHash;
 
 /// Consensus support
 pub trait ConsensusSupport<F: Content + Sync> {
@@ -42,7 +41,7 @@ pub trait ConsensusSupport<F: Content + Sync> {
 
 /// A trait define the proposal content, wrapper `Clone`, `Debug`, `Hash`,
 /// `Send`, `'static`, `Serialize` and `Deserialize`.
-pub trait Content: Clone + Debug + StdHash + Send + 'static + Serialize + DeserializeOwned {
+pub trait Content: Clone + Debug + Send + 'static + Serialize + DeserializeOwned {
     /// Encode and decode error.
     type Error: Debug;
     /// A function to encode the content into bytes.
