@@ -227,14 +227,11 @@ where
                     && signed_proposal_height - self.height < CACHE_NUMBER as u64
                 {
                     if cfg!(feature = "wal_on") {
-                        if let Ok(res) = to_string(&signed_proposal) {
-                            if self
-                                .wal_log
+                        if let Ok(res) = String::from_utf8(bytes.clone()) {
+                            // TODO
+                            self.wal_log
                                 .save(signed_proposal_height, LOG_TYPE_SIGNED_PROPOSAL, res)
-                                .is_err()
-                            {
-                                return Err(ConsensusError::SaveWalErr);
-                            }
+                                .map_err(|_e| ConsensusError::SaveWalErr)?;
                         } else {
                             return Err(ConsensusError::SerJsonErr);
                         }
@@ -1014,19 +1011,38 @@ where
             match msg_type {
                 LOG_TYPE_SIGNED_PROPOSAL => {
                     info!("Consensus loads signed_proposal");
-                    let msg: SignedProposal = from_slice(&msg).expect("Try from message failed!");
-                    if let Ok((proposal, verify_resp)) = self.handle_signed_proposal(msg, false) {
-                        info!("Consensus hands over bft_proposal to bft-rs");
+
+                    let (sp, block) =
+                        extract(&msg).expect("Consensus decode signed proposal error!");
+                    let signed_proposal: SignedProposal =
+                        rlp::decode(&sp).expect("Consensus rlp decode signed proposal error!");
+                    let (_, b, hash) = decode_block(&block).expect("Consensus decode block error!");
+                    let block: F = Content::decode(&b).expect("Consensus decode block error!");
+                    self.block_origin_cache
+                        .entry(hash)
+                        .or_insert_with(|| block.clone());
+                    let signed_proposal_height = signed_proposal.proposal.height;
+
+                    if signed_proposal_height > self.height
+                        && signed_proposal_height - self.height < CACHE_NUMBER as u64
+                    {
+                        self.proposal_cache
+                            .entry(signed_proposal_height)
+                            .or_insert_with(Vec::new)
+                            .push((signed_proposal.clone(), block, msg.clone()));
+                    }
+
+                    let (proposal, verify_resp) = self
+                        .handle_signed_proposal(signed_proposal, true, &msg)
+                        .expect("Consensus hands over signed proposal failed!");
+                    self.bft
+                        .send_bft_msg(CoreInput::Proposal(proposal))
+                        .expect("Consensus hands over signed proposal failed!");
+                    if let Some(res) = verify_resp {
                         self.bft
-                            .send_bft_msg(CoreInput::Proposal(proposal))
-                            .expect("Consensus hands over bft_proposal failed!");
-                        if let Some(verify_resp) = verify_resp {
-                            info!("Consensus hands over verify_resp to bft-rs");
-                            self.bft
-                                .send_bft_msg(CoreInput::VerifyResp(verify_resp.to_bft_resp()))
-                                .expect("Consensus hands over verify_resp failed!");
-                        }
-                    };
+                            .send_bft_msg(CoreInput::VerifyResp(res.to_bft_resp()))
+                            .expect("Consensus hands over signed proposal failed!");
+                    }
                 }
                 LOG_TYPE_RAW_BYTES => {
                     info!("Consensus loads raw_bytes message");
