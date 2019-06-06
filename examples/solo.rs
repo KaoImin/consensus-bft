@@ -11,12 +11,26 @@ use rand::random;
 use rlp::{Decodable, DecoderError, Encodable, Rlp, RlpStream};
 use serde::{Deserialize, Serialize};
 use std::thread;
-use utils::support::Support;
+use utils::support::{Error, Support};
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Hash, Serialize, Deserialize)]
 pub struct BftContent(Vec<u8>);
 
-impl Content for BftContent {}
+impl Content for BftContent {
+    type Error = Error;
+
+    fn encode(self) -> Result<Vec<u8>, Self::Error> {
+        Ok(self.0.clone())
+    }
+
+    fn decode(_bytes: &[u8]) -> Result<Self, Self::Error> {
+        Ok(BftContent(vec![]))
+    }
+
+    fn hash(&self) -> Vec<u8> {
+        self.0.clone()
+    }
+}
 
 impl BftContent {
     pub(crate) fn new(size: usize) -> Self {
@@ -44,7 +58,7 @@ fn main() {
     let mut builder = Builder::from_default_env();
     builder.filter(None, log::LevelFilter::Debug).init();
 
-    let (s_proposal, r_proposal) = bounded::<(BftContent, Vec<u8>)>(1);
+    let (s_proposal, r_proposal) = bounded::<BftContent>(1);
     let (s_signal, r_signal) = bounded::<u64>(1);
     let support = Support::new(vec![1, 2, 3], s_signal, r_proposal);
     let executor = ConsensusExecutor::new(support, vec![1, 2, 3], "examples/wal/log");
@@ -55,14 +69,13 @@ fn main() {
                 height: 0,
                 interval: None,
                 authority_list: vec![Node::new(vec![1, 2, 3])],
-                prev_hash: vec![0, 0, 0],
             }))
             .unwrap();
         println!("Send Genesis");
 
         loop {
             let msg = BftContent::new(1);
-            s_proposal.send((msg.clone(), msg.0)).unwrap();
+            s_proposal.send(msg.clone()).unwrap();
             println!("Send proposal");
 
             if let Ok(height) = r_signal.recv() {
@@ -72,7 +85,6 @@ fn main() {
                         height,
                         interval: None,
                         authority_list: vec![Node::new(vec![1, 2, 3])],
-                        prev_hash: (0..160).map(|_| random::<u8>()).collect::<Vec<_>>(),
                     }))
                     .unwrap();
             }

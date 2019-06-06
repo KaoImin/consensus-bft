@@ -4,6 +4,10 @@ pub enum ConsensusError {
     ///
     BlockVerifyDiff,
     ///
+    DecodeErr,
+    ///
+    EncodeErr,
+    ///
     SendMsgErr,
     ///
     SupportErr,

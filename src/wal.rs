@@ -146,6 +146,7 @@ impl Wal {
         Ok(hlen as u64)
     }
 
+    #[cfg(feature = "wal_on")]
     pub fn load(&mut self) -> Vec<(u8, Vec<u8>)> {
         let mut vec_buf: Vec<u8> = Vec::new();
         let mut vec_out: Vec<(u8, Vec<u8>)> = Vec::new();

@@ -1,7 +1,4 @@
-use crate::{
-    types::{SignedProposal, SignedVote, VoteType},
-    Content,
-};
+use crate::types::{SignedProposal, SignedVote, VoteType};
 use bft_core::types::Vote as BftVote;
 use lru_cache::LruCache;
 use std::collections::HashMap;
@@ -153,21 +150,18 @@ pub(crate) struct SigVote {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct ProposalCollector<F: Content + Sync> {
-    pub(crate) proposals: LruCache<u64, ProposalRoundCollector<F>>,
+pub(crate) struct ProposalCollector {
+    pub(crate) proposals: LruCache<u64, ProposalRoundCollector>,
 }
 
-impl<F> ProposalCollector<F>
-where
-    F: Content + Sync,
-{
+impl ProposalCollector {
     pub(crate) fn new() -> Self {
         ProposalCollector {
             proposals: LruCache::new(CACHE_NUMBER),
         }
     }
 
-    pub(crate) fn add(&mut self, height: u64, round: u64, proposal: &SignedProposal<F>) -> bool {
+    pub(crate) fn add(&mut self, height: u64, round: u64, proposal: &SignedProposal) -> bool {
         if self.proposals.contains_key(&height) {
             self.proposals
                 .get_mut(&height)
@@ -189,21 +183,18 @@ where
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct ProposalRoundCollector<F: Content + Sync> {
-    pub(crate) round_proposals: LruCache<u64, SignedProposal<F>>,
+pub(crate) struct ProposalRoundCollector {
+    pub(crate) round_proposals: LruCache<u64, SignedProposal>,
 }
 
-impl<F> ProposalRoundCollector<F>
-where
-    F: Content + Sync,
-{
+impl ProposalRoundCollector {
     pub(crate) fn new() -> Self {
         ProposalRoundCollector {
             round_proposals: LruCache::new(CACHE_NUMBER),
         }
     }
 
-    pub(crate) fn add(&mut self, round: u64, proposal: &SignedProposal<F>) -> bool {
+    pub(crate) fn add(&mut self, round: u64, proposal: &SignedProposal) -> bool {
         if self.round_proposals.contains_key(&round) {
             false
         } else {

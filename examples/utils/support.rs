@@ -1,11 +1,11 @@
 use consensus_bft::{
-    types::{Address, Hash, Commit, ConsensusOutput, Signature},
+    types::{Address, Commit, ConsensusOutput, Hash, Signature},
     ConsensusSupport, Content,
 };
 use crossbeam_channel::{Receiver, Sender};
 
 #[derive(Clone, Debug)]
-pub(crate) enum Error {
+pub enum Error {
     SupportError,
 }
 
@@ -13,14 +13,14 @@ pub(crate) enum Error {
 pub(crate) struct Support<F: Content + Sync> {
     address: Vec<u8>,
     send: Sender<u64>,
-    recv: Receiver<(F, Hash)>,
+    recv: Receiver<F>,
 }
 
 impl<F> Support<F>
 where
     F: Content + Sync,
 {
-    pub(crate) fn new(address: Vec<u8>, send: Sender<u64>, recv: Receiver<(F, Hash)>) -> Self {
+    pub(crate) fn new(address: Vec<u8>, send: Sender<u64>, recv: Receiver<F>) -> Self {
         Support {
             address,
             send,
@@ -39,7 +39,13 @@ where
         Ok(())
     }
 
-    fn check_proposal(&self, _block_hash: &Hash, _block: F, _height: u64) -> Result<(), Self::Error> {
+    fn check_proposal(
+        &self,
+        _block_hash: &[u8],
+        _block: &F,
+        _signed_proposal_hash: &[u8],
+        _height: u64,
+    ) -> Result<(), Self::Error> {
         Ok(())
     }
 
@@ -60,7 +66,7 @@ where
         msg.to_vec()
     }
 
-    fn get_content(&self, _height: u64) -> Result<(F, Hash), Self::Error> {
+    fn get_content(&self, _height: u64) -> Result<F, Self::Error> {
         self.recv.recv().map_err(|_| Error::SupportError)
     }
 }
