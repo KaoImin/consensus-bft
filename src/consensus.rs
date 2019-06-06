@@ -80,7 +80,7 @@ pub(crate) struct Consensus<
     proof: Option<Proof>,
     wal_log: Wal,
     block_origin_cache: HashMap<Hash, F>,
-    proposal_cache: HashMap<u64, Vec<SignedProposal>>,
+    proposal_cache: HashMap<u64, Vec<(SignedProposal, F, Vec<u8>)>>,
     vote_cache: HashMap<u64, Vec<SignedVote>>,
     consensus_power: bool,
 
@@ -178,7 +178,7 @@ where
                 }
             }
             AsyncMsg::Feed(f) => {
-                let hash = f.content.hash();
+                let hash = Content::hash(&f.content);
                 self.bft
                     .send_bft_msg(CoreInput::Feed(BftFeed {
                         height: f.height,
@@ -218,9 +218,37 @@ where
                     rlp::decode(&sp).map_err(|_| ConsensusError::DecodeErr)?;
                 let (_, b, hash) = decode_block(&block).map_err(|_| ConsensusError::DecodeErr)?;
                 let block: F = Content::decode(&b).map_err(|_| ConsensusError::DecodeErr)?;
-                self.block_origin_cache.entry(hash).or_insert_with(|| block);
+                self.block_origin_cache
+                    .entry(hash)
+                    .or_insert_with(|| block.clone());
+                let signed_proposal_height = signed_proposal.proposal.height;
 
-                let (proposal, verify_resp) = self.handle_signed_proposal(signed_proposal, true)?;
+                if signed_proposal_height > self.height
+                    && signed_proposal_height - self.height < CACHE_NUMBER as u64
+                {
+                    if cfg!(feature = "wal_on") {
+                        if let Ok(res) = to_string(&signed_proposal) {
+                            if self
+                                .wal_log
+                                .save(signed_proposal_height, LOG_TYPE_SIGNED_PROPOSAL, res)
+                                .is_err()
+                            {
+                                return Err(ConsensusError::SaveWalErr);
+                            }
+                        } else {
+                            return Err(ConsensusError::SerJsonErr);
+                        }
+                    }
+
+                    self.proposal_cache
+                        .entry(signed_proposal_height)
+                        .or_insert_with(Vec::new)
+                        .push((signed_proposal, block, bytes));
+                    return Ok(());
+                }
+
+                let (proposal, verify_resp) =
+                    self.handle_signed_proposal(signed_proposal, true, &bytes)?;
                 self.bft
                     .send_bft_msg(CoreInput::Proposal(proposal))
                     .map_err(|_| ConsensusError::SendMsgErr)?;
@@ -304,8 +332,10 @@ where
         if proposals.is_none() {
             return Ok(());
         }
+
         for signed_proposal in proposals.unwrap().1.into_iter() {
-            let (proposal, resp) = self.handle_signed_proposal(signed_proposal, true)?;
+            let (proposal, resp) =
+                self.handle_signed_proposal(signed_proposal.0, true, &signed_proposal.2)?;
             info!(
                 "Consensus hands over bft_proposal to bft-rs!\n{:?}",
                 proposal
@@ -350,12 +380,6 @@ where
         }
 
         let hash = proposal.content.clone();
-        if self.block_origin_cache.contains_key(&hash) {
-            let block = self.block_origin_cache.get(&hash).unwrap();
-            self.verify_proposal(&hash, block);
-        } else {
-            return Err(ConsensusError::LoseBlock);
-        }
 
         if cfg!(feature = "wal_on") && need_wal {
             if let Ok(msg) = to_string(&proposal) {
@@ -375,6 +399,12 @@ where
                 &signed_proposal.rlp_bytes(),
                 &encode_block(self.height, &content_encode, &hash),
             );
+
+            if let Some(block) = self.block_origin_cache.get(&hash) {
+                self.check_proposal(&hash, block, &encode);
+            } else {
+                return Err(ConsensusError::LoseBlock);
+            }
             Ok(encode)
         } else {
             return Err(ConsensusError::LoseBlock);
@@ -535,14 +565,16 @@ where
         .unwrap();
     }
 
-    fn verify_proposal(&self, proposal_hash: &[u8], proposal: &F) {
+    fn check_proposal(&self, proposal_hash: &[u8], proposal: &F, signed_proposal_hash: &[u8]) {
         let func = self.function.clone();
         let height = self.height;
         let sender = self.async_send.clone();
 
         crossbeam_thread::scope(|s| {
             s.spawn(|_| {
-                let is_pass = func.check_proposal(proposal_hash, proposal, height).is_ok();
+                let is_pass = func
+                    .check_proposal(proposal_hash, proposal, signed_proposal_hash, height)
+                    .is_ok();
                 info!("Receive verify result {:?} at height {:?}", is_pass, height);
 
                 sender
@@ -590,6 +622,7 @@ where
         &mut self,
         msg: SignedProposal,
         need_wal: bool,
+        signed_proposal_hash: &[u8],
     ) -> Result<(BftProposal, Option<VerifyResp>)> {
         // check signature
         let sig = msg.signature.clone();
@@ -617,30 +650,17 @@ where
             return Err(ConsensusError::ObsoleteMsg);
         }
 
-        if height >= self.height {
-            if cfg!(feature = "wal_on") && height - self.height < CACHE_NUMBER as u64 && need_wal {
-                if let Ok(res) = to_string(&msg) {
-                    if self
-                        .wal_log
-                        .save(height, LOG_TYPE_SIGNED_PROPOSAL, res)
-                        .is_err()
-                    {
-                        return Err(ConsensusError::SaveWalErr);
-                    }
-                } else {
-                    return Err(ConsensusError::SerJsonErr);
+        if cfg!(feature = "wal_on") && need_wal {
+            if let Ok(res) = to_string(&msg) {
+                if self
+                    .wal_log
+                    .save(height, LOG_TYPE_SIGNED_PROPOSAL, res)
+                    .is_err()
+                {
+                    return Err(ConsensusError::SaveWalErr);
                 }
-            }
-            if height > self.height {
-                self.proposal_cache
-                    .entry(height)
-                    .or_insert_with(Vec::new)
-                    .push(msg);
-                info!(
-                    "The height of signed_proposal is {} which is higher than self.height {}",
-                    height, self.height
-                );
-                return Err(ConsensusError::FutureMsg);
+            } else {
+                return Err(ConsensusError::SerJsonErr);
             }
         }
 
@@ -667,7 +687,7 @@ where
                 proposal: hash.clone(),
             })
         } else if let Some(content) = self.block_origin_cache.get(&hash) {
-            self.verify_proposal(&hash, content);
+            self.check_proposal(&hash, content, signed_proposal_hash);
             None
         } else {
             return Err(ConsensusError::LoseBlock);
@@ -1031,7 +1051,7 @@ where
                 LOG_TYPE_BLOCK_TXS => {
                     info!("Consensus loads block_txs message");
                     let msg: Feed<F> = from_slice(&msg).expect("Try from message failed!");
-                    let hash = msg.content.hash();
+                    let hash = Content::hash(&msg.content);
 
                     self.bft
                         .send_bft_msg(CoreInput::Feed(BftFeed {

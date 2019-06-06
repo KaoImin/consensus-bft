@@ -8,6 +8,7 @@
 use crate::types::{Address, Commit, ConsensusOutput, Hash, Signature};
 use serde::{de::DeserializeOwned, ser::Serialize};
 use std::fmt::Debug;
+use std::hash::Hash as StdHash;
 
 /// Consensus support
 pub trait ConsensusSupport<F: Content + Sync> {
@@ -20,7 +21,13 @@ pub trait ConsensusSupport<F: Content + Sync> {
     fn transmit(&self, msg: ConsensusOutput<F>) -> Result<(), Self::Error>;
     /// Check the validity of the transcations of a proposal. If success return `Ok(())`,
     /// else return `Err()`.
-    fn check_proposal(&self, proposal_hash: &[u8], proposal: &F, height: u64) -> Result<(), Self::Error>;
+    fn check_proposal(
+        &self,
+        proposal_hash: &[u8],
+        proposal: &F,
+        signed_proposal_hash: &[u8],
+        height: u64,
+    ) -> Result<(), Self::Error>;
     /// Do commit.
     fn commit(&self, commit: Commit<F>) -> Result<(), Self::Error>;
     /// Use the given hash and private key to sign a signature. If success, return `Ok(signature)`,
@@ -33,9 +40,9 @@ pub trait ConsensusSupport<F: Content + Sync> {
     fn hash(&self, msg: &[u8]) -> Hash;
 }
 
-/// A trait define the proposal content, wrapper `Clone`, `Debug`,
+/// A trait define the proposal content, wrapper `Clone`, `Debug`, `Hash`,
 /// `Send`, `'static`, `Serialize` and `Deserialize`.
-pub trait Content: Clone + Debug + Send + 'static + Serialize + DeserializeOwned {
+pub trait Content: Clone + Debug + StdHash + Send + 'static + Serialize + DeserializeOwned {
     /// Encode and decode error.
     type Error: Debug;
     /// A function to encode the content into bytes.

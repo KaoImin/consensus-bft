@@ -13,7 +13,7 @@ use serde::{Deserialize, Serialize};
 use std::thread;
 use utils::support::{Error, Support};
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Hash, Serialize, Deserialize)]
 pub struct BftContent(Vec<u8>);
 
 impl Content for BftContent {

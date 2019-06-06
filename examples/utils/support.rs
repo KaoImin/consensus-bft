@@ -43,6 +43,7 @@ where
         &self,
         _block_hash: &[u8],
         _block: &F,
+        _signed_proposal_hash: &[u8],
         _height: u64,
     ) -> Result<(), Self::Error> {
         Ok(())
