@@ -21,6 +21,7 @@ use serde_json::from_slice;
 use serde_json::to_string;
 use std::{
     collections::{HashMap, HashSet},
+    sync::Arc,
     thread,
 };
 
@@ -44,7 +45,7 @@ pub struct ConsensusExecutor(Sender<ConsensusInput>);
 impl ConsensusExecutor {
     /// A function to generate a new consensus executor.
     pub fn new<F: Content + Sync, T: ConsensusSupport<F> + Send + 'static + Clone + Sync>(
-        support: T,
+        support: Arc<T>,
         address: Address,
         wal_path: &str,
     ) -> Self {
@@ -84,7 +85,7 @@ pub(crate) struct Consensus<
     vote_cache: HashMap<u64, Vec<SignedVote>>,
     consensus_power: bool,
 
-    function: T,
+    function: Arc<T>,
 }
 
 impl<T, F> Consensus<T, F>
@@ -92,7 +93,12 @@ where
     T: ConsensusSupport<F> + Send + 'static + Sync + Clone,
     F: Content + Sync,
 {
-    fn new(support: T, address: Address, recv: Receiver<ConsensusInput>, wal_path: String) -> Self {
+    fn new(
+        support: Arc<T>,
+        address: Address,
+        recv: Receiver<ConsensusInput>,
+        wal_path: String,
+    ) -> Self {
         let (send, bft_recv) = unbounded();
         let core = BFT::new(SendMsg::new(send), address.clone());
         let (async_send, async_recv) = unbounded();
@@ -123,7 +129,7 @@ where
 
     /// A function to start a consensus service.
     pub(crate) fn start(
-        support: T,
+        support: Arc<T>,
         address: Address,
         recv: Receiver<ConsensusInput>,
         wal_path: String,
@@ -312,7 +318,8 @@ where
             CoreOutput::Commit(c) => {
                 info!("Receive commit");
                 let commit = self.handle_commit(c, true)?;
-                let status = self.function
+                let status = self
+                    .function
                     .commit(commit)
                     .map_err(|_| ConsensusError::SupportErr)?;
                 self.external_process(ConsensusInput::Status(status))
