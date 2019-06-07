@@ -44,7 +44,7 @@ pub struct ConsensusExecutor(Sender<ConsensusInput>);
 
 impl ConsensusExecutor {
     /// A function to generate a new consensus executor.
-    pub fn new<F: Content + Sync, T: ConsensusSupport<F> + Send + 'static + Clone + Sync>(
+    pub fn new<F: Content + Sync, T: ConsensusSupport<F> + Send + 'static + Sync>(
         support: Arc<T>,
         address: Address,
         wal_path: &str,
@@ -61,10 +61,7 @@ impl ConsensusExecutor {
 }
 
 /// A consensus type.
-pub(crate) struct Consensus<
-    T: ConsensusSupport<F> + Send + 'static + Sync + Clone,
-    F: Content + Sync,
-> {
+pub(crate) struct Consensus<T: ConsensusSupport<F> + Send + 'static + Sync, F: Content + Sync> {
     bft_recv: Receiver<CoreOutput>,
     interface_recv: Receiver<ConsensusInput>,
     async_send: Sender<AsyncMsg<F>>,
@@ -90,7 +87,7 @@ pub(crate) struct Consensus<
 
 impl<T, F> Consensus<T, F>
 where
-    T: ConsensusSupport<F> + Send + 'static + Sync + Clone,
+    T: ConsensusSupport<F> + Send + 'static + Sync,
     F: Content + Sync,
 {
     fn new(
