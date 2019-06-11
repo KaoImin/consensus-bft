@@ -136,7 +136,9 @@ where
             let mut engine = Consensus::new(support, address, recv, wal_path);
             #[cfg(feature = "wal_on")]
             {
-                engine.load_wal_log();
+                let _ = engine
+                    .load_wal_log()
+                    .map_err(|e| error!("Load Wal Error {:?}", e));
             }
 
             loop {
@@ -216,11 +218,16 @@ where
             ConsensusInput::SignedProposal(bytes) => {
                 info!("Receive signed proposal");
                 // TODO: This can be process parallely.
-                let (sp, block) = extract(&bytes).map_err(|_| ConsensusError::DecodeErr)?;
-                let signed_proposal: SignedProposal =
-                    rlp::decode(&sp).map_err(|_| ConsensusError::DecodeErr)?;
-                let (_, b, hash) = decode_block(&block).map_err(|_| ConsensusError::DecodeErr)?;
-                let block: F = Content::decode(&b).map_err(|_| ConsensusError::DecodeErr)?;
+                let (sp, block) = extract(&bytes).map_err(|_| {
+                    ConsensusError::DecodeErr("Decode signed proposal error".to_string())
+                })?;
+                let signed_proposal: SignedProposal = rlp::decode(&sp).map_err(|e| {
+                    ConsensusError::DecodeErr(format!("Rlp decode block error {:?}", e))
+                })?;
+                let (_, b, hash) = decode_block(&block)
+                    .map_err(|_| ConsensusError::DecodeErr("Decode block error".to_string()))?;
+                let block: F = Content::decode(&b)
+                    .map_err(|_| ConsensusError::DecodeErr("Decode block error".to_string()))?;
                 self.block_origin_cache
                     .entry(hash)
                     .or_insert_with(|| block.clone());
@@ -263,7 +270,9 @@ where
             }
             ConsensusInput::SignedVote(bytes) => {
                 info!("Receive signed vote");
-                let sv: SignedVote = rlp::decode(&bytes).map_err(|_| ConsensusError::DecodeErr)?;
+                let sv: SignedVote = rlp::decode(&bytes).map_err(|e| {
+                    ConsensusError::DecodeErr(format!("Rlp decode signed vote error {:?}", e))
+                })?;
                 let vote = self.handle_signed_vote(sv, true)?;
                 self.bft
                     .send_bft_msg(CoreInput::Vote(vote))
@@ -1026,20 +1035,27 @@ where
 
     #[warn(dead_code)]
     #[cfg(feature = "wal_on")]
-    fn load_wal_log(&mut self) {
+    fn load_wal_log(&mut self) -> Result<()> {
         info!("Consensus starts to load wal log!");
         let vec_buf = self.wal_log.load();
         for (msg_type, msg) in vec_buf {
             match msg_type {
                 LOG_TYPE_SIGNED_PROPOSAL => {
                     info!("Consensus loads signed_proposal");
+                    let (sp, block) = extract(&msg)?;
+                    let signed_proposal: SignedProposal = rlp::decode(&sp).map_err(|error| {
+                        ConsensusError::DecodeErr(format!(
+                            "Rlp decode signed proposal error {:?}",
+                            error
+                        ))
+                    })?;
+                    let (_, b, hash) = decode_block(&block).map_err(|error| {
+                        ConsensusError::DecodeErr(format!("Rlp decode block error {:?}", error))
+                    })?;
+                    let block: F = Content::decode(&b).map_err(|error| {
+                        ConsensusError::DecodeErr(format!("Rlp decode block error {:?}", error))
+                    })?;
 
-                    let (sp, block) =
-                        extract(&msg).expect("Consensus decode signed proposal error!");
-                    let signed_proposal: SignedProposal =
-                        rlp::decode(&sp).expect("Consensus rlp decode signed proposal error!");
-                    let (_, b, hash) = decode_block(&block).expect("Consensus decode block error!");
-                    let block: F = Content::decode(&b).expect("Consensus decode block error!");
                     self.block_origin_cache
                         .entry(hash)
                         .or_insert_with(|| block.clone());
@@ -1054,56 +1070,56 @@ where
                             .push((signed_proposal.clone(), block, msg.clone()));
                     }
 
-                    let (proposal, verify_resp) = self
-                        .handle_signed_proposal(signed_proposal, true, &msg)
-                        .expect("Consensus hands over signed proposal failed!");
+                    let (proposal, verify_resp) =
+                        self.handle_signed_proposal(signed_proposal, true, &msg)?;
                     self.bft
                         .send_bft_msg(CoreInput::Proposal(proposal))
-                        .expect("Consensus hands over signed proposal failed!");
+                        .map_err(|_| ConsensusError::SendMsgErr("BftProposal".to_string()))?;
                     if let Some(res) = verify_resp {
                         self.bft
                             .send_bft_msg(CoreInput::VerifyResp(res.to_bft_resp()))
-                            .expect("Consensus hands over signed proposal failed!");
+                            .map_err(|_| ConsensusError::SendMsgErr("BftVerifyResp".to_string()))?;
                     }
                 }
                 LOG_TYPE_RAW_BYTES => {
                     info!("Consensus loads raw_bytes message");
-                    let msg: SignedVote = from_slice(&msg).expect("Try from message failed!");
+                    let msg: SignedVote = from_slice(&msg)
+                        .map_err(|_| ConsensusError::DeJsonErr("SignedVote".to_string()))?;
                     if let Ok(vote) = self.handle_signed_vote(msg, false) {
-                        info!("Consensus hands over bft_vote to bft-rs");
                         self.bft
                             .send_bft_msg(CoreInput::Vote(vote))
-                            .expect("Consensus hands over bft_vote failed!");
+                            .map_err(|_| ConsensusError::SendMsgErr("BftVote".to_string()))?;
                     };
                 }
                 LOG_TYPE_RICH_STATUS => {
                     info!("Consensus loads rich_status message");
-                    let msg: Status = from_slice(&msg).expect("Try from message failed!");
+                    let msg: Status = from_slice(&msg)
+                        .map_err(|_| ConsensusError::DeJsonErr("Status".to_string()))?;
                     if let Ok(status) = self.handle_rich_status(msg, false) {
-                        info!("Consensus hands over bft_status to bft-rs");
                         self.bft
                             .send_bft_msg(CoreInput::Status(status))
-                            .expect("Consensus hands over bft_status failed!");
+                            .map_err(|_| ConsensusError::SendMsgErr("BftStatus".to_string()))?;
                     };
                 }
                 LOG_TYPE_BLOCK_TXS => {
                     info!("Consensus loads block_txs message");
-                    let msg: Feed<F> = from_slice(&msg).expect("Try from message failed!");
+                    let msg: Feed<F> = from_slice(&msg)
+                        .map_err(|_| ConsensusError::DeJsonErr("Feed".to_string()))?;
                     let hash = Content::hash(&msg.content);
-
                     self.bft
                         .send_bft_msg(CoreInput::Feed(BftFeed {
                             height: msg.height,
                             proposal: hash.clone(),
                         }))
-                        .expect("Consensus hands over bft_status failed!");
+                        .map_err(|_| ConsensusError::SendMsgErr("BftFeed".to_string()))?;
                     self.block_origin_cache
                         .entry(hash)
                         .or_insert_with(|| msg.content);
                 }
                 LOG_TYPE_VERIFY_BLOCK_PESP => {
                     info!("Consensus loads verify_block_resp message");
-                    let msg: VerifyResp = from_slice(&msg).expect("Try from message failed!");
+                    let msg: VerifyResp = from_slice(&msg)
+                        .map_err(|_| ConsensusError::DeJsonErr("VerifyResp".to_string()))?;
                     let hash = msg.proposal;
 
                     self.bft
@@ -1111,49 +1127,45 @@ where
                             is_pass: msg.is_pass,
                             proposal: hash.clone(),
                         }))
-                        .expect("Consensus hands over bft_status failed!");
+                        .map_err(|_| ConsensusError::SendMsgErr("BftVerifyResp".to_string()))?;
                     self.verified_block.entry(hash).or_insert(msg.is_pass);
                 }
                 LOG_TYPE_PROPOSAL => {
                     info!("Consensus loads bft_proposal message");
-                    let proposal: BftProposal =
-                        from_slice(&msg).expect("Deserialize message failed!");
+                    let proposal: BftProposal = from_slice(&msg)
+                        .map_err(|_| ConsensusError::DeJsonErr("BftProposal".to_string()))?;
                     if let Ok(signed_proposal) = self.handle_proposal(proposal.clone(), false) {
-                        info!(
-                            "Consensus sends signed_proposal to rabbit_mq!\n{:?}",
-                            proposal
-                        );
                         self.function
                             .transmit(ConsensusOutput::SignedProposal(signed_proposal))
-                            .expect("Consensus sends signed_proposal failed!");;
+                            .map_err(|_| {
+                                ConsensusError::SendMsgErr("SignedProposal".to_string())
+                            })?;
                     };
                 }
                 LOG_TYPE_VOTE => {
                     info!("Consensus loads bft_vote message");
-                    let vote: BftVote = from_slice(&msg).expect("Deserialize message failed!");
+                    let vote: BftVote = from_slice(&msg)
+                        .map_err(|_| ConsensusError::DeJsonErr("BftVote".to_string()))?;
                     if let Ok(raw_bytes) = self.handle_vote(vote.clone(), false) {
-                        info!("Consensus sends raw_bytes to rabbit_mq!\n{:?}", vote);
                         self.function
                             .transmit(ConsensusOutput::SignedVote(raw_bytes.rlp_bytes()))
-                            .expect("Consensus sends raw_bytes failed!");
+                            .map_err(|_| ConsensusError::SendMsgErr("SignedVote".to_string()))?;
                     };
                 }
                 LOG_TYPE_COMMIT => {
                     info!("Consensus loads bft_commit message!");
-                    let commit: BftCommit = from_slice(&msg).expect("Deserialize message failed!");
+                    let commit: BftCommit = from_slice(&msg)
+                        .map_err(|_| ConsensusError::DeJsonErr("BftCommit".to_string()))?;
                     if let Ok(block_with_proof) = self.handle_commit(commit.clone(), true) {
-                        info!(
-                            "Consensus sends block_with_proof to rabbit_mq!\n{:?}",
-                            commit
-                        );
                         self.function
                             .commit(block_with_proof)
-                            .expect("Consensus sends block_with_proof failed!");
+                            .map_err(|_| ConsensusError::SendMsgErr("Commit".to_string()))?;
                     };
                 }
                 _ => {}
             }
         }
         info!("Consensus successfully processes the whole wal log!");
+        Ok(())
     }
 }

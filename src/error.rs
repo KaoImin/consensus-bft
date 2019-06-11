@@ -4,7 +4,7 @@ pub enum ConsensusError {
     ///
     BlockVerifyDiff,
     ///
-    DecodeErr,
+    DecodeErr(String),
     ///
     EncodeErr,
     ///
@@ -15,6 +15,8 @@ pub enum ConsensusError {
     SupportErr,
     ///
     SerJsonErr(String),
+    ///
+    DeJsonErr(String),
     ///
     SaveWalErr(String),
     ///
