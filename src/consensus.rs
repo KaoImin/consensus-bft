@@ -316,22 +316,28 @@ where
                 let sp = self.handle_proposal(p, true)?;
                 self.function
                     .transmit(ConsensusOutput::SignedProposal(sp))
-                    .map_err(|_| ConsensusError::SupportErr)
+                    .map_err(|e| {
+                        ConsensusError::SupportErr(format!(
+                            "Transmit signed proposal error {:?}",
+                            e
+                        ))
+                    })
             }
             CoreOutput::Vote(v) => {
                 info!("Receive vote");
                 let sv = self.handle_vote(v, true)?;
                 self.function
                     .transmit(ConsensusOutput::SignedVote(sv.rlp_bytes()))
-                    .map_err(|_| ConsensusError::SupportErr)
+                    .map_err(|e| {
+                        ConsensusError::SupportErr(format!("Transmit signed vote error {:?}", e))
+                    })
             }
             CoreOutput::Commit(c) => {
                 info!("Receive commit");
                 let commit = self.handle_commit(c, true)?;
-                let status = self
-                    .function
-                    .commit(commit)
-                    .map_err(|_| ConsensusError::SupportErr)?;
+                let status = self.function.commit(commit).map_err(|e| {
+                    ConsensusError::SupportErr(format!("Commit proposal error {:?}", e))
+                })?;
                 self.external_process(ConsensusInput::Status(status))
             }
             CoreOutput::GetProposalRequest(h) => {
@@ -482,7 +488,7 @@ where
         let sig = self
             .function
             .sign(&hash)
-            .map_err(|_| ConsensusError::SupportErr)?;
+            .map_err(|e| ConsensusError::SupportErr(format!("Sign proposal error {:?}", e)))?;
 
         Ok(SignedProposal {
             proposal: signed_proposal,
@@ -518,16 +524,18 @@ where
 
         let signed_vote = Vote::from_bft_vote(vote.clone(), vtype.clone());
         let hash = self.function.hash(&signed_vote.rlp_bytes());
-        if let Ok(sig) = self.function.sign(&hash) {
-            let res = SignedVote {
-                vote: signed_vote,
-                signature: sig,
-            };
-            self.votes.add(height, vote.round, vtype, &vote, &res);
-            Ok(res)
-        } else {
-            return Err(ConsensusError::SupportErr);
-        }
+
+        let signature = self
+            .function
+            .sign(&hash)
+            .map_err(|e| ConsensusError::SupportErr(format!("Sign vote error {:?}", e)))?;
+
+        let res = SignedVote {
+            vote: signed_vote,
+            signature,
+        };
+        self.votes.add(height, vote.round, vtype, &vote, &res);
+        Ok(res)
     }
 
     fn handle_commit(&mut self, commit: BftCommit, need_wal: bool) -> Result<Commit<F>> {
@@ -662,13 +670,16 @@ where
         let address = self
             .function
             .verify_signature(&sig, &hash)
-            .map_err(|_| ConsensusError::SupportErr)?;
+            .map_err(|e| ConsensusError::SupportErr(format!("Verify signature error {:?}", e)))?;
 
         let height = proposal.height;
         let round = proposal.round;
         let hash = proposal.hash.clone();
 
         if proposal.proposer != address {
+            error!("The address recovers from the signature is {:?} which is mismatching with the sender {:?}!", 
+                &address, &proposal.proposer
+            );
             return Err(ConsensusError::SignatureErr);
         }
 
@@ -738,7 +749,7 @@ where
         let address = self
             .function
             .verify_signature(&sig, &hash)
-            .map_err(|_| ConsensusError::SupportErr)?;
+            .map_err(|e| ConsensusError::SupportErr(format!("Verify signature error {:?}", e)))?;
 
         let height = vote.height;
         let round = vote.round;
@@ -752,7 +763,9 @@ where
         }
         let address = address;
         if sender != address {
-            error!("The address recovers from the signature is {:?} which is mismatching with the sender {:?}!", &address, &sender);
+            error!("The address recovers from the signature is {:?} which is mismatching with the sender {:?}!",
+                &address, &sender
+            );
             return Err(ConsensusError::SignatureErr);
         }
 
@@ -928,11 +941,11 @@ where
         let sig = signed_vote.signature.clone();
         let hash = self.function.hash(&vote.rlp_bytes());
 
-        let address = self.function.verify_signature(&sig, &hash);
-        if address.is_err() {
-            return Err(ConsensusError::SupportErr);
-        }
-        if address.unwrap() != sender {
+        let address = self
+            .function
+            .verify_signature(&sig, &hash)
+            .map_err(|e| ConsensusError::SupportErr(format!("Verify signature error {:?}", e)))?;
+        if address != sender {
             error!(
                 "The address recovers from the signature is mismatching with the sender {:?}!",
                 &sender

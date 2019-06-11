@@ -12,7 +12,7 @@ pub enum ConsensusError {
     ///
     RecvMsgErr,
     ///
-    SupportErr,
+    SupportErr(String),
     ///
     SerJsonErr(String),
     ///
