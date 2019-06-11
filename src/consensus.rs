@@ -599,7 +599,6 @@ where
         is_by_self: bool,
     ) {
         let func = self.function.clone();
-        let height = self.height;
         let sender = self.async_send.clone();
 
         crossbeam_thread::scope(|s| {
@@ -609,12 +608,11 @@ where
                         proposal_hash,
                         proposal,
                         signed_proposal_hash,
-                        height,
                         is_lock,
                         is_by_self,
                     )
                     .is_ok();
-                info!("Receive verify result {:?} at height {:?}", is_pass, height);
+                info!("Receive verify result {:?} at height {:?}", is_pass, self.height);
 
                 sender
                     .send(AsyncMsg::VerifyResp(VerifyResp {
