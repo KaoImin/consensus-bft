@@ -41,6 +41,7 @@ where
         _signed_proposal_hash: &[u8],
         _height: u64,
         _is_lock: bool,
+        _is_by_self: bool,
     ) -> Result<(), Self::Error> {
         Ok(())
     }

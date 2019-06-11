@@ -27,6 +27,7 @@ pub trait ConsensusSupport<F: Content + Sync> {
         signed_proposal_hash: &[u8],
         height: u64,
         is_lock: bool,
+        is_by_self: bool,
     ) -> Result<(), Self::Error>;
     /// Do commit.
     fn commit(&self, commit: Commit<F>) -> Result<Status, Self::Error>;

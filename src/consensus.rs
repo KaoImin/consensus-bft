@@ -417,7 +417,7 @@ where
             );
 
             if let Some(block) = self.block_origin_cache.get(&hash) {
-                self.check_proposal(&hash, block, &encode, is_lock);
+                self.check_proposal(&hash, block, &encode, is_lock, true);
             } else {
                 return Err(ConsensusError::LoseBlock);
             }
@@ -588,6 +588,7 @@ where
         proposal: &F,
         signed_proposal_hash: &[u8],
         is_lock: bool,
+        is_by_self: bool,
     ) {
         let func = self.function.clone();
         let height = self.height;
@@ -602,6 +603,7 @@ where
                         signed_proposal_hash,
                         height,
                         is_lock,
+                        is_by_self,
                     )
                     .is_ok();
                 info!("Receive verify result {:?} at height {:?}", is_pass, height);
@@ -717,7 +719,7 @@ where
             })
         } else if let Some(content) = self.block_origin_cache.get(&hash) {
             let is_lock = proposal.lock_round.is_some();
-            self.check_proposal(&hash, content, signed_proposal_hash, is_lock);
+            self.check_proposal(&hash, content, signed_proposal_hash, is_lock, false);
             None
         } else {
             return Err(ConsensusError::LoseBlock);
