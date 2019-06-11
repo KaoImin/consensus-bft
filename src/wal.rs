@@ -1,9 +1,12 @@
 use log::{trace, warn};
-use std::collections::BTreeMap;
-use std::fs::{read_dir, DirBuilder, File, OpenOptions};
-use std::io::{self, Read, Seek, Write};
-use std::mem::transmute;
-use std::str;
+
+use std::{
+    collections::BTreeMap,
+    fs::{read_dir, DirBuilder, File, OpenOptions},
+    io::{self, Read, Seek, Write},
+    mem::transmute,
+    str,
+};
 
 const DELETE_FILE_INTERVAL: u64 = 3;
 

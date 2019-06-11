@@ -174,12 +174,6 @@ impl ProposalCollector {
             true
         }
     }
-
-    // pub(crate) fn get_proposal(&mut self, height: u64, round: u64) -> Option<SignedProposal> {
-    //     self.proposals
-    //         .get_mut(&height)
-    //         .and_then(|prc| prc.get_proposal(round))
-    // }
 }
 
 #[derive(Clone, Debug)]

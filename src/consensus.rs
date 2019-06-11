@@ -7,11 +7,13 @@ use crate::{
     ConsensusSupport, Content,
 };
 
-use bft_core::types::{
-    Commit as BftCommit, CoreInput, CoreOutput, Feed as BftFeed, Proposal as BftProposal,
-    Status as BftStatus, VerifyResp as BftVerifyResp, Vote as BftVote, VoteType as BftVoteType,
+use bft_core::{
+    types::{
+        Commit as BftCommit, CoreInput, CoreOutput, Feed as BftFeed, Proposal as BftProposal,
+        Status as BftStatus, VerifyResp as BftVerifyResp, Vote as BftVote, VoteType as BftVoteType,
+    },
+    Core as BFT,
 };
-use bft_core::Core as BFT;
 use crossbeam_channel::{select, unbounded, Receiver, Sender};
 use crossbeam_utils::thread as crossbeam_thread;
 use log::{debug, error, info, warn};
