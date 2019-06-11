@@ -84,7 +84,7 @@ pub struct SignedProposal {
 
 impl Encodable for SignedProposal {
     fn rlp_append(&self, s: &mut RlpStream) {
-        s.begin_list(3)
+        s.begin_list(2)
             .append(&self.proposal)
             .append(&self.signature);
     }
@@ -93,7 +93,7 @@ impl Encodable for SignedProposal {
 impl Decodable for SignedProposal {
     fn decode(r: &Rlp) -> Result<Self, DecoderError> {
         match r.prototype()? {
-            Prototype::List(3) => {
+            Prototype::List(2) => {
                 let proposal: Proposal = r.val_at(0)?;
                 let signature: Signature = r.val_at(1)?;
                 Ok(SignedProposal {
