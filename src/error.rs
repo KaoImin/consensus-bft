@@ -8,13 +8,15 @@ pub enum ConsensusError {
     ///
     EncodeErr,
     ///
-    SendMsgErr,
+    SendMsgErr(String),
+    ///
+    RecvMsgErr,
     ///
     SupportErr,
     ///
-    SerJsonErr,
+    SerJsonErr(String),
     ///
-    SaveWalErr,
+    SaveWalErr(String),
     ///
     BftCoreErr,
     ///

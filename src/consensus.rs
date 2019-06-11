@@ -56,7 +56,7 @@ impl ConsensusExecutor {
 
     /// A functiont to send a `ConsensusInput`.
     pub fn send(&self, input: ConsensusInput) -> Result<()> {
-        self.0.send(input).map_err(|_| ConsensusError::SendMsgErr)
+        self.0.send(input).map_err(|_| ConsensusError::RecvMsgErr)
     }
 }
 
@@ -142,13 +142,13 @@ where
             loop {
                 select! {
                     recv(engine.bft_recv) -> bft_msg => if let Ok(bft_msg) = bft_msg {
-                        let _ = engine.core_process(bft_msg).map_err(|err| panic!("Consensus Error {:?}", err));
+                        let _ = engine.core_process(bft_msg).map_err(|err| error!("Consensus Error {:?}", err));
                     },
                     recv(engine.interface_recv) -> external_msg => if let Ok(external_msg) = external_msg {
-                        let _ = engine.external_process(external_msg).map_err(|err| panic!("Consensus Error {:?}", err));
+                        let _ = engine.external_process(external_msg).map_err(|err| error!("Consensus Error {:?}", err));
                     },
                     recv(engine.async_recv) -> async_msg => if let Ok(async_msg) = async_msg {
-                        let _ = engine.async_process(async_msg).map_err(|err| panic!("Consensus Error {:?}", err));
+                        let _ = engine.async_process(async_msg).map_err(|err| error!("Consensus Error {:?}", err));
                     },
                 }
             }
@@ -164,7 +164,7 @@ where
                         is_pass: vr.is_pass,
                         proposal: hash.clone(),
                     }))
-                    .map_err(|_| ConsensusError::SendMsgErr)?;
+                    .map_err(|_| ConsensusError::SendMsgErr("VerifyResp".to_string()))?;
                 self.verified_block.entry(hash).or_insert(vr.is_pass);
                 if cfg!(feature = "wal_on") {
                     if let Ok(res) = to_string(&vr) {
@@ -173,10 +173,10 @@ where
                             .save(self.height, LOG_TYPE_VERIFY_BLOCK_PESP, res)
                             .is_err()
                         {
-                            return Err(ConsensusError::SaveWalErr);
+                            return Err(ConsensusError::SaveWalErr("VerifyResp".to_string()));
                         }
                     } else {
-                        return Err(ConsensusError::SerJsonErr);
+                        return Err(ConsensusError::SerJsonErr("VerifyResp".to_string()));
                     }
                 }
             }
@@ -187,7 +187,7 @@ where
                         height: f.height,
                         proposal: hash.clone(),
                     }))
-                    .map_err(|_| ConsensusError::SendMsgErr)?;
+                    .map_err(|_| ConsensusError::SendMsgErr("Feed".to_string()))?;
 
                 self.block_origin_cache
                     .entry(hash)
@@ -200,10 +200,10 @@ where
                             .save(self.height, LOG_TYPE_BLOCK_TXS, msg)
                             .is_err()
                         {
-                            return Err(ConsensusError::SaveWalErr);
+                            return Err(ConsensusError::SaveWalErr("Feed".to_string()));
                         }
                     } else {
-                        return Err(ConsensusError::SerJsonErr);
+                        return Err(ConsensusError::SerJsonErr("Feed".to_string()));
                     }
                 }
             }
@@ -234,9 +234,11 @@ where
                             // TODO
                             self.wal_log
                                 .save(signed_proposal_height, LOG_TYPE_SIGNED_PROPOSAL, res)
-                                .map_err(|_e| ConsensusError::SaveWalErr)?;
+                                .map_err(|_e| {
+                                    ConsensusError::SaveWalErr("SignedProposal".to_string())
+                                })?;
                         } else {
-                            return Err(ConsensusError::SerJsonErr);
+                            return Err(ConsensusError::SerJsonErr("SignedProposal".to_string()));
                         }
                     }
 
@@ -251,11 +253,11 @@ where
                     self.handle_signed_proposal(signed_proposal, true, &bytes)?;
                 self.bft
                     .send_bft_msg(CoreInput::Proposal(proposal))
-                    .map_err(|_| ConsensusError::SendMsgErr)?;
+                    .map_err(|_| ConsensusError::SendMsgErr("BftProposal".to_string()))?;
                 if let Some(res) = verify_resp {
                     self.bft
                         .send_bft_msg(CoreInput::VerifyResp(res.to_bft_resp()))
-                        .map_err(|_| ConsensusError::SendMsgErr)?;
+                        .map_err(|_| ConsensusError::SendMsgErr("BftVerifyResp".to_string()))?;
                 }
                 Ok(())
             }
@@ -265,7 +267,7 @@ where
                 let vote = self.handle_signed_vote(sv, true)?;
                 self.bft
                     .send_bft_msg(CoreInput::Vote(vote))
-                    .map_err(|_| ConsensusError::SendMsgErr)?;
+                    .map_err(|_| ConsensusError::SendMsgErr("BftVote".to_string()))?;
                 Ok(())
             }
             ConsensusInput::Status(rs) => {
@@ -277,18 +279,18 @@ where
                         self.consensus_power = true;
                         self.bft
                             .send_bft_msg(CoreInput::Start)
-                            .map_err(|_| ConsensusError::SendMsgErr)?;
+                            .map_err(|_| ConsensusError::SendMsgErr("BftStart".to_string()))?;
                     }
                 } else if self.consensus_power {
                     self.consensus_power = false;
                     self.bft
                         .send_bft_msg(CoreInput::Pause)
-                        .map_err(|_| ConsensusError::SendMsgErr)?;
+                        .map_err(|_| ConsensusError::SendMsgErr("BftPause".to_string()))?;
                 }
 
                 self.bft
                     .send_bft_msg(CoreInput::Status(status))
-                    .map_err(|_| ConsensusError::SendMsgErr)?;
+                    .map_err(|_| ConsensusError::SendMsgErr("BftStatus".to_string()))?;
                 self.send_cache_proposal(self.height)?;
                 self.send_cache_vote(self.height)?;
                 Ok(())
@@ -344,11 +346,11 @@ where
             );
             self.bft
                 .send_bft_msg(CoreInput::Proposal(proposal))
-                .map_err(|_| ConsensusError::SendMsgErr)?;
+                .map_err(|_| ConsensusError::SendMsgErr("BftProposal".to_string()))?;
             if let Some(result) = resp {
                 self.bft
                     .send_bft_msg(CoreInput::VerifyResp(result.to_bft_resp()))
-                    .map_err(|_| ConsensusError::SendMsgErr)?;
+                    .map_err(|_| ConsensusError::SendMsgErr("BftVerifyResp".to_string()))?;
             }
         }
         Ok(())
@@ -363,7 +365,7 @@ where
             let vote = self.handle_signed_vote(signed_vote, true)?;
             self.bft
                 .send_bft_msg(CoreInput::Vote(vote))
-                .map_err(|_| ConsensusError::SendMsgErr)?;
+                .map_err(|_| ConsensusError::SendMsgErr("BftVote".to_string()))?;
         }
         Ok(())
     }
@@ -387,10 +389,10 @@ where
         if cfg!(feature = "wal_on") && need_wal {
             if let Ok(msg) = to_string(&proposal) {
                 if self.wal_log.save(height, LOG_TYPE_PROPOSAL, msg).is_err() {
-                    return Err(ConsensusError::SaveWalErr);
+                    return Err(ConsensusError::SaveWalErr("BftProposal".to_string()));
                 }
             } else {
-                return Err(ConsensusError::SerJsonErr);
+                return Err(ConsensusError::SerJsonErr("BftProposal".to_string()));
             }
         }
         let signed_proposal = self.build_signed_proposal(proposal)?;
@@ -490,10 +492,10 @@ where
         if cfg!(feature = "wal_on") && need_wal {
             if let Ok(msg) = to_string(&vote) {
                 if self.wal_log.save(height, LOG_TYPE_VOTE, msg).is_err() {
-                    return Err(ConsensusError::SaveWalErr);
+                    return Err(ConsensusError::SaveWalErr("BftVote".to_string()));
                 }
             } else {
-                return Err(ConsensusError::SerJsonErr);
+                return Err(ConsensusError::SerJsonErr("BftVote".to_string()));
             }
         }
 
@@ -530,10 +532,10 @@ where
         if cfg!(feature = "wal_on") && need_wal {
             if let Ok(msg) = to_string(&commit) {
                 if self.wal_log.save(height, LOG_TYPE_COMMIT, msg).is_err() {
-                    return Err(ConsensusError::SaveWalErr);
+                    return Err(ConsensusError::SaveWalErr("BftCommit".to_string()));
                 }
             } else {
-                return Err(ConsensusError::SerJsonErr);
+                return Err(ConsensusError::SerJsonErr("BftCommit".to_string()));
             }
         }
 
@@ -556,6 +558,7 @@ where
         crossbeam_thread::scope(|s| {
             s.spawn(|_| {
                 if let Ok(proposal) = func.get_content(height) {
+                    info!("Receive Feed at height {:?}", height);
                     sender
                         .send(AsyncMsg::Feed(Feed {
                             content: proposal,
@@ -672,10 +675,10 @@ where
                     .save(height, LOG_TYPE_SIGNED_PROPOSAL, res)
                     .is_err()
                 {
-                    return Err(ConsensusError::SaveWalErr);
+                    return Err(ConsensusError::SaveWalErr("SignedProposal".to_string()));
                 }
             } else {
-                return Err(ConsensusError::SerJsonErr);
+                return Err(ConsensusError::SerJsonErr("SignedProposal".to_string()));
             }
         }
 
@@ -746,10 +749,10 @@ where
             if cfg!(feature = "wal_on") && height - self.height < CACHE_NUMBER as u64 && need_wal {
                 if let Ok(res) = to_string(&msg) {
                     if self.wal_log.save(height, LOG_TYPE_RAW_BYTES, res).is_err() {
-                        return Err(ConsensusError::SaveWalErr);
+                        return Err(ConsensusError::SaveWalErr("SignedVote".to_string()));
                     }
                 } else {
-                    return Err(ConsensusError::SerJsonErr);
+                    return Err(ConsensusError::SerJsonErr("SignedVote".to_string()));
                 }
             }
             if height > self.height {
@@ -788,10 +791,10 @@ where
                     .save(height, LOG_TYPE_RICH_STATUS, msg)
                     .is_err()
                 {
-                    return Err(ConsensusError::SaveWalErr);
+                    return Err(ConsensusError::SaveWalErr("Status".to_string()));
                 }
             } else {
-                return Err(ConsensusError::SerJsonErr);
+                return Err(ConsensusError::SerJsonErr("Status".to_string()));
             }
         }
 
@@ -982,7 +985,7 @@ where
         self.height = height + 1;
         if self.wal_log.set_height(self.height).is_err() {
             error!("Wal log set height {} failed!", self.height);
-            return Err(ConsensusError::SaveWalErr);
+            return Err(ConsensusError::SaveWalErr("CreateNewHeight".to_string()));
         };
         Ok(())
     }
