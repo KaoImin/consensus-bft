@@ -201,7 +201,7 @@ impl Encodable for SignedVote {
     fn rlp_append(&self, s: &mut RlpStream) {
         s.begin_list(2)
             .append(&self.vote)
-            .append_list(&self.signature);
+            .append(&self.signature);
     }
 }
 
