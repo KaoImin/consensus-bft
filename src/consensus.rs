@@ -382,6 +382,7 @@ where
         }
 
         let hash = proposal.content.clone();
+        let is_lock = proposal.lock_round.is_some();
 
         if cfg!(feature = "wal_on") && need_wal {
             if let Ok(msg) = to_string(&proposal) {
@@ -403,7 +404,7 @@ where
             );
 
             if let Some(block) = self.block_origin_cache.get(&hash) {
-                self.check_proposal(&hash, block, &encode);
+                self.check_proposal(&hash, block, &encode, is_lock);
             } else {
                 return Err(ConsensusError::LoseBlock);
             }
@@ -567,7 +568,13 @@ where
         .unwrap();
     }
 
-    fn check_proposal(&self, proposal_hash: &[u8], proposal: &F, signed_proposal_hash: &[u8]) {
+    fn check_proposal(
+        &self,
+        proposal_hash: &[u8],
+        proposal: &F,
+        signed_proposal_hash: &[u8],
+        is_lock: bool,
+    ) {
         let func = self.function.clone();
         let height = self.height;
         let sender = self.async_send.clone();
@@ -575,7 +582,13 @@ where
         crossbeam_thread::scope(|s| {
             s.spawn(|_| {
                 let is_pass = func
-                    .check_proposal(proposal_hash, proposal, signed_proposal_hash, height)
+                    .check_proposal(
+                        proposal_hash,
+                        proposal,
+                        signed_proposal_hash,
+                        height,
+                        is_lock,
+                    )
                     .is_ok();
                 info!("Receive verify result {:?} at height {:?}", is_pass, height);
 
@@ -689,7 +702,8 @@ where
                 proposal: hash.clone(),
             })
         } else if let Some(content) = self.block_origin_cache.get(&hash) {
-            self.check_proposal(&hash, content, signed_proposal_hash);
+            let is_lock = proposal.lock_round.is_some();
+            self.check_proposal(&hash, content, signed_proposal_hash, is_lock);
             None
         } else {
             return Err(ConsensusError::LoseBlock);
