@@ -612,7 +612,10 @@ where
                         is_by_self,
                     )
                     .is_ok();
-                info!("Receive verify result {:?} at height {:?}", is_pass, self.height);
+                info!(
+                    "Receive verify result {:?} at height {:?}",
+                    is_pass, self.height
+                );
 
                 sender
                     .send(AsyncMsg::VerifyResp(VerifyResp {
