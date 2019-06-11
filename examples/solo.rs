@@ -10,7 +10,7 @@ use env_logger::Builder;
 use rand::random;
 use rlp::{Decodable, DecoderError, Encodable, Rlp, RlpStream};
 use serde::{Deserialize, Serialize};
-use std::thread;
+use std::{sync::Arc, thread};
 use utils::support::{Error, Support};
 
 #[derive(Clone, Debug, Hash, Serialize, Deserialize)]
@@ -59,9 +59,8 @@ fn main() {
     builder.filter(None, log::LevelFilter::Debug).init();
 
     let (s_proposal, r_proposal) = bounded::<BftContent>(1);
-    let (s_signal, r_signal) = bounded::<u64>(1);
-    let support = Support::new(vec![1, 2, 3], s_signal, r_proposal);
-    let executor = ConsensusExecutor::new(support, vec![1, 2, 3], "examples/wal/log");
+    let support = Support::new(vec![1, 2, 3], r_proposal);
+    let executor = ConsensusExecutor::new(Arc::new(support), vec![1, 2, 3], "examples/wal/log");
 
     thread::spawn(move || {
         executor
@@ -75,19 +74,8 @@ fn main() {
 
         loop {
             let msg = BftContent::new(1);
-            s_proposal.send(msg.clone()).unwrap();
+            s_proposal.send(msg).unwrap();
             println!("Send proposal");
-
-            if let Ok(height) = r_signal.recv() {
-                println!("Send status at height {:?}", height);
-                executor
-                    .send(ConsensusInput::Status(Status {
-                        height,
-                        interval: None,
-                        authority_list: vec![Node::new(vec![1, 2, 3])],
-                    }))
-                    .unwrap();
-            }
         }
     })
     .join()

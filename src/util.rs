@@ -73,13 +73,13 @@ pub(crate) fn encode_block(height: u64, block: &[u8], block_hash: &[u8]) -> Vec<
 pub(crate) fn extract(encode: &[u8]) -> CResult<(&[u8], &[u8])> {
     let encode_len = encode.len();
     if encode_len < 8 {
-        return Err(ConsensusError::DecodeErr);
+        return Err(ConsensusError::DecodeErr("Bytes is too short".to_string()));
     }
     let mut len: [u8; 8] = [0; 8];
     len.copy_from_slice(&encode[0..8]);
     let first_len = u64::from_be_bytes(len) as usize;
     if encode_len < first_len + 8 {
-        return Err(ConsensusError::DecodeErr);
+        return Err(ConsensusError::DecodeErr("Bytes is too short".to_string()));
     }
     let (combine, two) = encode.split_at(first_len + 8);
     let (_, one) = combine.split_at(8);

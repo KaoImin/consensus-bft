@@ -4,17 +4,21 @@ pub enum ConsensusError {
     ///
     BlockVerifyDiff,
     ///
-    DecodeErr,
+    DecodeErr(String),
     ///
     EncodeErr,
     ///
-    SendMsgErr,
+    SendMsgErr(String),
     ///
-    SupportErr,
+    RecvMsgErr,
     ///
-    SerJsonErr,
+    SupportErr(String),
     ///
-    SaveWalErr,
+    SerJsonErr(String),
+    ///
+    DeJsonErr(String),
+    ///
+    SaveWalErr(String),
     ///
     BftCoreErr,
     ///
