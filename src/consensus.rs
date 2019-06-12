@@ -742,11 +742,11 @@ where
     }
 
     fn handle_signed_vote(&mut self, msg: SignedVote, need_wal: bool) -> Result<BftVote> {
-        let sig = msg.signature.clone();
-        let vote = msg.vote.clone();
+        let sig = &msg.signature;
+        let vote = &msg.vote;
 
         // check signature
-        let hash = self.function.hash(&msg.rlp_bytes());
+        let hash = self.function.hash(&vote.rlp_bytes());
         let address = self
             .function
             .verify_signature(&sig, &hash)
@@ -754,7 +754,7 @@ where
 
         let height = vote.height;
         let round = vote.round;
-        let sender = vote.voter.clone();
+        let sender = &vote.voter;
         if height < self.height - 1 {
             warn!(
                 "The height of raw_bytes is {} which is obsolete compared to self.height {}!",
@@ -762,8 +762,8 @@ where
             );
             return Err(ConsensusError::ObsoleteMsg);
         }
-        let address = address;
-        if sender != address {
+
+        if sender != &address {
             error!("The address recovers from the signature is {:?} which is mismatching with the sender {:?}!",
                 &address, &sender
             );
@@ -795,7 +795,7 @@ where
             }
         }
         self.votes
-            .add(height, round, vote.vote_type, &bft_vote, &msg);
+            .add(height, round, vote.to_owned().vote_type, &bft_vote, &msg);
         self.check_vote_sender(height, &sender)?;
         Ok(bft_vote)
     }
