@@ -340,7 +340,7 @@ where
             CoreOutput::Commit(c) => {
                 info!("Receive commit");
                 let commit = self.handle_commit(c, true)?;
-                
+
                 info!("Commit proposal at height {:?}", self.height);
                 let status = self.function.commit(commit).map_err(|e| {
                     ConsensusError::SupportErr(format!("Commit proposal error {:?}", e))
@@ -571,13 +571,13 @@ where
         }
 
         let round = commit.round;
-        let vote = commit.lock_votes.clone();
         let hash = commit.proposal;
-
+        let address = commit.address;
+        let vote = commit.lock_votes;
         if let Some(proposal) = self.block_origin_cache.get(&hash).cloned() {
             let proof = self.generate_proof(height, round, hash, vote)?;
             self.proof = Some(proof.clone());
-            return Ok(Commit::new(height, proposal, proof, commit.address));
+            return Ok(Commit::new(height, proposal, proof, address));
         }
         Err(ConsensusError::LoseBlock)
     }
@@ -677,12 +677,12 @@ where
         signed_proposal_hash: &[u8],
     ) -> Result<(BftProposal, Option<VerifyResp>)> {
         // check signature
-        let sig = msg.signature.clone();
+        let sig = &msg.signature;
         let proposal = msg.proposal.clone();
         let hash = self.function.hash(&proposal.rlp_bytes());
         let address = self
             .function
-            .verify_signature(&sig, &hash)
+            .verify_signature(sig, &hash)
             .map_err(|e| ConsensusError::SupportErr(format!("Verify signature error {:?}", e)))?;
 
         let height = proposal.height;
@@ -858,13 +858,13 @@ where
 
         let mut auth_list = Vec::new();
         for node in authorities.iter() {
-            auth_list.push(node.clone().address);
+            auth_list.push(&node.address);
         }
 
         let proposer_nonce = height + round;
-        let proposer = &auth_list[proposer_nonce as usize % (*authorities).len()];
+        let proposer = auth_list[proposer_nonce as usize % (*authorities).len()];
 
-        if *proposer == address.to_vec() {
+        if *proposer == address {
             Ok(())
         } else {
             error!(
@@ -889,27 +889,21 @@ where
 
         let mut set = HashSet::new();
         let lock_round = proposal.lock_round.unwrap();
-        let votes = proposal.lock_votes.clone();
-        for vote in votes.into_iter() {
+        let votes = &proposal.lock_votes;
+        for vote in votes.iter() {
             let sender = self.check_signed_vote(height, lock_round, proposal_hash, vote)?;
             if !set.insert(sender) {
                 return Err(ConsensusError::BlockVerifyDiff);
             }
         }
 
-        let authority_n = if height == self.authority.authority_h_old {
-            info!("Consensus sets the authority manage with old authorities!");
-            into_addr_set(self.authority.authorities_old.clone())
-        } else {
-            into_addr_set(self.authority.authorities.clone())
-        };
-
-        if set.len() * 3 > authority_n.len() * 2 {
-            for sender in set.into_iter() {
-                if !authority_n.contains(&sender) {
-                    return Err(ConsensusError::IllegalProposalLock);
-                }
-            }
+        if self
+            .authority
+            .is_above_threshold(set.len(), height == self.authority.authority_h_old)
+            && self
+                .authority
+                .contains_sender(set, height == self.authority.authority_h_old)
+        {
             return Ok(());
         }
         Err(ConsensusError::IllegalProposalLock)
@@ -920,9 +914,9 @@ where
         height: u64,
         round: u64,
         proposal_hash: &[u8],
-        signed_vote: SignedVote,
+        signed_vote: &SignedVote,
     ) -> Result<Address> {
-        let vote = signed_vote.vote.clone();
+        let vote = &signed_vote.vote;
         if height < self.height - 1 {
             error!(
                 "The vote's height {} is less than self.height {} - 1, which should not happen!",
@@ -931,34 +925,30 @@ where
             return Err(ConsensusError::ObsoleteMsg);
         }
 
-        let authorities = if height == self.authority.authority_h_old {
-            info!("Consensus sets the authority manage with old authorities!");
-            &self.authority.authorities_old
-        } else {
-            &self.authority.authorities
-        };
-
         if vote.proposal != proposal_hash {
             return Err(ConsensusError::BlockVerifyDiff);
         }
 
-        let sender = vote.voter.clone();
-        if !authorities.contains(&Node {
-            address: sender.clone(),
-            proposal_weight: 1,
-            vote_weight: 1,
-        }) {
+        let authorities = if height == self.authority.authority_h_old {
+            info!("Consensus sets the authority manage with old authorities!");
+            &self.authority.address_set_old
+        } else {
+            &self.authority.address_set
+        };
+
+        let sender = &vote.voter;
+        if !authorities.contains(sender) {
             return Err(ConsensusError::InvalidVoter);
         }
 
-        let sig = signed_vote.signature.clone();
+        let sig = &signed_vote.signature;
         let hash = self.function.hash(&vote.rlp_bytes());
 
         let address = self
             .function
-            .verify_signature(&sig, &hash)
+            .verify_signature(sig, &hash)
             .map_err(|e| ConsensusError::SupportErr(format!("Verify signature error {:?}", e)))?;
-        if address != sender {
+        if &address != sender {
             error!(
                 "The address recovers from the signature is mismatching with the sender {:?}!",
                 &sender
@@ -969,7 +959,7 @@ where
         let bft_vote = vote.to_bft_vote();
         self.votes
             .add(height, round, VoteType::Prevote, &bft_vote, &signed_vote);
-        Ok(sender)
+        Ok(sender.to_vec())
     }
 
     fn check_proof(&mut self, height: u64, proof: &Proof) -> Result<()> {
@@ -992,11 +982,7 @@ where
         }
         let proof = proof.to_owned();
 
-        if let Some(res) = self.proof.clone() {
-            if res.height != height - 1 {
-                self.proof = Some(proof.clone());
-            }
-        } else {
+        if self.proof.is_none() || self.proof.clone().unwrap().height != height - 1 {
             self.proof = Some(proof);
         }
         Ok(())
@@ -1005,12 +991,12 @@ where
     fn check_vote_sender(&self, height: u64, sender: &[u8]) -> Result<()> {
         let authorities = if height == self.authority.authority_h_old {
             info!("Consensus sets the authority manage with old authorities!");
-            into_addr_set(self.authority.authorities_old.clone())
+            &self.authority.address_set_old
         } else {
-            into_addr_set(self.authority.authorities.clone())
+            &self.authority.address_set
         };
 
-        if !authorities.contains(&sender.to_vec()) {
+        if !authorities.contains(sender) {
             error!("The raw_bytes have invalid voter {:?}!", &sender);
             return Err(ConsensusError::InvalidVoter);
         }
