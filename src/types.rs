@@ -199,9 +199,7 @@ pub struct SignedVote {
 
 impl Encodable for SignedVote {
     fn rlp_append(&self, s: &mut RlpStream) {
-        s.begin_list(2)
-            .append(&self.vote)
-            .append(&self.signature);
+        s.begin_list(2).append(&self.vote).append(&self.signature);
     }
 }
 
