@@ -326,6 +326,11 @@ where
             CoreOutput::Vote(v) => {
                 info!("Receive vote");
                 let sv = self.handle_vote(v, true)?;
+                info!(
+                    "Send {:?} vote at height {:?}, round {:?} from {:?}",
+                    sv.vote.vote_type, self.height, sv.vote.round, self.address
+                );
+
                 self.function
                     .transmit(ConsensusOutput::SignedVote(sv.rlp_bytes()))
                     .map_err(|e| {
@@ -335,6 +340,8 @@ where
             CoreOutput::Commit(c) => {
                 info!("Receive commit");
                 let commit = self.handle_commit(c, true)?;
+                
+                info!("Commit proposal at height {:?}", self.height);
                 let status = self.function.commit(commit).map_err(|e| {
                     ConsensusError::SupportErr(format!("Commit proposal error {:?}", e))
                 })?;
@@ -427,6 +434,11 @@ where
             } else {
                 return Err(ConsensusError::LoseBlock);
             }
+
+            info!(
+                "Send signed proposal at height {:?}, round {:?}",
+                height, round
+            );
             Ok(encode)
         } else {
             return Err(ConsensusError::LoseBlock);
