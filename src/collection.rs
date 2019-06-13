@@ -144,12 +144,6 @@ impl VoteSet {
 }
 
 #[derive(Clone, Debug)]
-pub(crate) struct SigVote {
-    proposal: Option<Vec<u8>>,
-    pub(crate) signature: Vec<u8>,
-}
-
-#[derive(Clone, Debug)]
 pub(crate) struct ProposalCollector {
     pub(crate) proposals: LruCache<u64, ProposalRoundCollector>,
 }

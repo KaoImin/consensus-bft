@@ -5,7 +5,7 @@ use log::error;
 use rlp::{Decodable, DecoderError, Encodable, Prototype, Rlp, RlpStream};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 /// Address type.
 pub type Address = Vec<u8>;
@@ -199,9 +199,7 @@ pub struct SignedVote {
 
 impl Encodable for SignedVote {
     fn rlp_append(&self, s: &mut RlpStream) {
-        s.begin_list(2)
-            .append(&self.vote)
-            .append_list(&self.signature);
+        s.begin_list(2).append(&self.vote).append(&self.signature);
     }
 }
 
@@ -339,15 +337,19 @@ pub struct Status {
 
 impl Status {
     /// A function to convert a rich status into the corresponding type in BFT-core.
-    pub(crate) fn to_bft_status(&self) -> bft::Status {
-        let mut res = Vec::new();
-        for node in self.authority_list.iter() {
-            res.push(node.address.to_owned());
-        }
+    pub(crate) fn to_bft_status(self) -> bft::Status {
+        let height = self.height;
+        let interval = self.interval;
+        let authority_list = self
+            .authority_list
+            .into_iter()
+            .map(|node| node.address)
+            .collect::<Vec<Address>>();
+
         bft::Status {
-            height: self.height,
-            interval: self.interval,
-            authority_list: res,
+            height,
+            interval,
+            authority_list,
         }
     }
 }
@@ -386,8 +388,12 @@ impl VerifyResp {
 pub struct AuthorityManage {
     /// The authority list at present.
     pub authorities: Vec<Node>,
+    ///
+    pub address_set: HashSet<Address>,
     /// An old authority.
     pub authorities_old: Vec<Node>,
+    ///
+    pub address_set_old: HashSet<Address>,
     /// The height of the old authority.
     pub authority_h_old: u64,
 }
@@ -396,7 +402,9 @@ impl Default for AuthorityManage {
     fn default() -> Self {
         AuthorityManage {
             authorities: Vec::new(),
+            address_set: HashSet::new(),
             authorities_old: Vec::new(),
+            address_set_old: HashSet::new(),
             authority_h_old: INIT_HEIGHT,
         }
     }
@@ -404,11 +412,42 @@ impl Default for AuthorityManage {
 
 impl AuthorityManage {
     /// A function to update authority list.
-    pub(crate) fn update_authority(&mut self, h: u64, auth_list: Vec<Node>) {
+    pub(crate) fn update_authority(&mut self, old_height: u64, auth_list: Vec<Node>) {
         let tmp = self.authorities.clone();
-        self.authorities = auth_list;
+        self.authorities = auth_list.clone();
         self.authorities_old = tmp;
-        self.authority_h_old = h;
+
+        let tmp = self.address_set.clone();
+        self.address_set_old = tmp;
+        self.authority_h_old = old_height;
+
+        self.address_set.clear();
+        self.address_set = auth_list
+            .into_iter()
+            .map(|node| node.address)
+            .collect::<HashSet<Address>>();
+    }
+
+    pub(crate) fn is_above_threshold(&self, len: usize, is_old: bool) -> bool {
+        if is_old {
+            if len * 3 > self.authorities_old.len() * 2 {
+                return true;
+            }
+        } else if len * 3 > self.authorities_old.len() * 2 {
+            return true;
+        }
+        false
+    }
+
+    pub(crate) fn contains_sender(&self, sender: HashSet<Address>, is_old: bool) -> bool {
+        if is_old {
+            return sender
+                .iter()
+                .any(|addr| self.address_set_old.contains(addr));
+        }
+        sender
+            .iter()
+            .any(|addr| self.address_set_old.contains(addr))
     }
 }
 
