@@ -1,6 +1,7 @@
 use crate::{consensus::Result as CResult, error::ConsensusError, types::*};
 use bft_core::{types::CoreOutput, FromCore};
 use crossbeam_channel::Sender;
+use hex::{decode, encode};
 use rlp::Encodable;
 
 /// An independent function to check proof.
@@ -19,7 +20,7 @@ pub fn check_proof(
         return false;
     }
 
-    let vote_addresses: Vec<Address> = proof
+    let vote_addresses: Vec<String> = proof
         .precommit_votes
         .iter()
         .map(|(sender, _)| sender.clone())
@@ -31,21 +32,24 @@ pub fn check_proof(
     let addr_set = into_addr_set(authority.to_owned());
 
     for (sender, sig) in proof.to_owned().precommit_votes.into_iter() {
-        if addr_set.contains(&sender) {
-            let msg = Vote {
-                vote_type: VoteType::Precommit,
-                height: proof.height,
-                round: proof.round,
-                proposal: proof.block_hash.clone(),
-                voter: sender.clone(),
-            };
-            let hash = crypt_hash(&msg.rlp_bytes());
+        if let Ok(voter) = decode(sender.clone()) {
+            if addr_set.contains(&voter) {
+                let msg = Vote {
+                    vote_type: VoteType::Precommit,
+                    height: proof.height,
+                    round: proof.round,
+                    proposal: proof.block_hash.clone(),
+                    voter,
+                };
+                let hash = crypt_hash(&msg.rlp_bytes());
 
-            if Some(sender) != verify_signature(&sig, &hash) {
+                let addr = verify_signature(&sig, &hash);
+                if addr.is_none() || encode(addr.unwrap()) != sender {
+                    return false;
+                }
+            } else {
                 return false;
             }
-        } else {
-            return false;
         }
     }
     true
@@ -107,10 +111,10 @@ pub fn get_total_weight(authorities: &[Node]) -> u64 {
 
 ///
 #[inline]
-pub fn get_votes_weight(authorities: &[Node], vote_addresses: &[Address]) -> u64 {
+pub fn get_votes_weight(authorities: &[Node], vote_addresses: &[String]) -> u64 {
     let votes_weight: Vec<u64> = authorities
         .iter()
-        .filter(|node| vote_addresses.contains(&node.address))
+        .filter(|node| vote_addresses.contains(&encode(node.address.clone())))
         .map(|node| u64::from(node.vote_weight))
         .collect();
     votes_weight.iter().sum()

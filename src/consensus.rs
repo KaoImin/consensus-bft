@@ -16,6 +16,7 @@ use bft_core::{
 };
 use crossbeam_channel::{select, unbounded, Receiver, Sender};
 use crossbeam_utils::thread as crossbeam_thread;
+use hex::{decode, encode};
 use log::{debug, error, info, warn};
 use rlp::Encodable;
 #[cfg(feature = "wal_on")]
@@ -651,7 +652,7 @@ where
         if let Some(vote_set) = self.votes.get_vote_set(height, round, VoteType::Precommit) {
             for v in vote.into_iter() {
                 if let Some(signed_vote) = vote_set.vote_pair.get(&v) {
-                    tmp.entry(v.voter)
+                    tmp.entry(encode(v.voter))
                         .or_insert_with(|| signed_vote.signature.clone());
                 } else {
                     return Err(ConsensusError::LoseSignedVote);
@@ -1026,24 +1027,26 @@ where
         }
 
         for (sender, sig) in proof.precommit_votes.clone().into_iter() {
-            if authority.contains(&sender) {
-                let proposal = &proof.block_hash;
-                let msg = Vote {
-                    vote_type: VoteType::Precommit,
-                    height: proof.height,
-                    round: proof.round,
-                    proposal: proposal.to_vec(),
-                    voter: sender.clone(),
-                };
-                let hash = self.function.hash(&msg.rlp_bytes());
+            if let Ok(voter) = decode(sender.clone()) {
+                if authority.contains(&voter) {
+                    let proposal = &proof.block_hash;
+                    let msg = Vote {
+                        vote_type: VoteType::Precommit,
+                        height: proof.height,
+                        round: proof.round,
+                        proposal: proposal.to_vec(),
+                        voter,
+                    };
+                    let hash = self.function.hash(&msg.rlp_bytes());
 
-                if let Ok(address) = self.function.verify_signature(&sig, &hash) {
-                    if address != sender {
-                        return false;
+                    if let Ok(address) = self.function.verify_signature(&sig, &hash) {
+                        if encode(address) != sender {
+                            return false;
+                        }
                     }
+                } else {
+                    return false;
                 }
-            } else {
-                return false;
             }
         }
         true

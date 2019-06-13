@@ -488,7 +488,7 @@ pub struct Proof {
     /// The rounf of votes in the proof.
     pub round: u64,
     /// The precommit vote set of the proof.
-    pub precommit_votes: HashMap<Address, Hash>,
+    pub precommit_votes: HashMap<String, Hash>,
 }
 
 impl Encodable for Proof {
@@ -497,10 +497,10 @@ impl Encodable for Proof {
             .append(&self.height)
             .append(&self.round)
             .append(&self.block_hash);
-        let mut key_values: Vec<(Address, Signature)> =
+        let mut key_values: Vec<(String, Signature)> =
             self.precommit_votes.clone().into_iter().collect();
         key_values.sort();
-        let mut key_list: Vec<Address> = vec![];
+        let mut key_list: Vec<String> = vec![];
         let mut value_list: Vec<Signature> = vec![];
         key_values.iter().for_each(|(address, sig)| {
             key_list.push(address.to_owned());
@@ -524,7 +524,7 @@ impl Decodable for Proof {
                 let height: u64 = r.val_at(0)?;
                 let round: u64 = r.val_at(1)?;
                 let block_hash: Hash = r.val_at(2)?;
-                let key_list: Vec<Address> = r.list_at(3)?;
+                let key_list: Vec<String> = r.list_at(3)?;
                 let value_list: Vec<Signature> = r.list_at(4)?;
                 if key_list.len() != value_list.len() {
                     error!(
@@ -548,5 +548,126 @@ impl Decodable for Proof {
                 Err(DecoderError::RlpInconsistentLengthAndData)
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use super::*;
+    use hex::encode;
+    use rand::random;
+    use serde_json::{from_slice, to_string};
+
+    impl SignedProposal {
+        fn new(proposal: Proposal) -> Self {
+            let signature = gen_sig();
+            SignedProposal {
+                proposal,
+                signature,
+            }
+        }
+    }
+
+    impl Proposal {
+        fn new() -> Self {
+            Proposal {
+                height: random::<u64>(),
+                round: random::<u64>(),
+                hash: gen_hash(),
+                lock_round: None,
+                lock_votes: Vec::new(),
+                proof: Proof::new(),
+                proposer: gen_addr(),
+            }
+        }
+    }
+
+    impl SignedVote {
+        fn new(vote: Vote) -> Self {
+            let signature = gen_sig();
+            SignedVote { vote, signature }
+        }
+    }
+
+    impl Vote {
+        fn new(vote_type: VoteType) -> Self {
+            Vote {
+                vote_type,
+                height: random::<u64>(),
+                round: random::<u64>(),
+                proposal: gen_hash(),
+                voter: gen_addr(),
+            }
+        }
+    }
+
+    impl VerifyResp {
+        fn new(is_pass: bool) -> Self {
+            let proposal = gen_hash();
+            VerifyResp { is_pass, proposal }
+        }
+    }
+
+    impl Proof {
+        fn new() -> Self {
+            let mut precommit_votes = HashMap::new();
+            precommit_votes.insert(encode(gen_hash()), gen_addr());
+
+            Proof {
+                block_hash: gen_hash(),
+                height: random::<u64>(),
+                round: random::<u64>(),
+                precommit_votes,
+            }
+        }
+    }
+
+    fn gen_hash() -> Vec<u8> {
+        (0..16).map(|_| random::<u8>()).collect::<Vec<u8>>()
+    }
+
+    fn gen_addr() -> Vec<u8> {
+        (0..24).map(|_| random::<u8>()).collect::<Vec<u8>>()
+    }
+
+    fn gen_sig() -> Vec<u8> {
+        (0..32).map(|_| random::<u8>()).collect::<Vec<u8>>()
+    }
+
+    #[test]
+    fn test_serde_types() {
+        // test proof
+        let pf = Proof::new();
+        let json = to_string(&pf).expect("Serialize proof error");
+        let res: Proof = from_slice(json.as_bytes()).expect("Deserialize proof error");
+        assert_eq!(pf, res);
+
+        // test signed proposal
+        let sp = SignedProposal::new(Proposal::new());
+        let json = to_string(&sp)
+            .map_err(|e| println!("{:?}", e.classify()))
+            .unwrap();
+        let res: SignedProposal =
+            from_slice(json.as_bytes()).expect("Deserialize signed proposal error");
+        assert_eq!(sp, res);
+
+        // test signed prevote vote
+        let sv = SignedVote::new(Vote::new(VoteType::Prevote));
+        let json = to_string(&sv).expect("Serialize signed vote error");
+        let res: SignedVote = from_slice(json.as_bytes()).expect("Deserialize signed vote error");
+        assert_eq!(sv, res);
+
+        // test signed precommit vote
+        let sv = SignedVote::new(Vote::new(VoteType::Precommit));
+        let json = to_string(&sv).expect("Serialize signed vote error");
+        let res: SignedVote = from_slice(json.as_bytes()).expect("Deserialize signed vote error");
+        assert_eq!(sv, res);
+
+        // test verify result
+        let vr = VerifyResp::new(true);
+        let json = to_string(&vr).expect("Serialize verify response error");
+        let res: VerifyResp =
+            from_slice(json.as_bytes()).expect("Deserialize verify response error");
+        assert_eq!(vr, res);
     }
 }
